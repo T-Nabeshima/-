@@ -26,12 +26,14 @@
                 </p>
             </div>
             <div class="flex gap-2 text-sm">
-                <button @click="exportData" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded shadow-sm">エクスポート</button>
+                <!-- 設定画面とダッシュボードの切り替えボタン -->
+                <button v-if="currentMode === 'monthly'" @click="currentMode = 'settings'" class="bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold px-3 py-1 rounded shadow-sm">⚙️ 初期値設定</button>
+                <button v-if="currentMode === 'monthly'" @click="exportData" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded shadow-sm">エクスポート</button>
             </div>
         </header>
 
-        <!-- 口座残高サマリー -->
-        <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <!-- 口座残高サマリー (月次モードの時だけ表示) -->
+        <section v-if="currentMode === 'monthly'" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
             <div class="bg-white p-4 rounded-lg shadow border-t-4 border-blue-500">
                 <div class="text-xs text-gray-500 mb-1">当月収支</div>
                 <div class="text-xl font-bold text-gray-700">¥{{ currentMonthNet.toLocaleString() }}</div>
@@ -50,15 +52,23 @@
             </div>
         </section>
 
-        <!-- 月選択 -->
-        <div class="flex justify-between items-center bg-white p-4 rounded-t-lg shadow-sm mb-1 border-b">
+        <!-- 月選択 (月次モードの時だけ表示) -->
+        <div v-if="currentMode === 'monthly'" class="flex justify-between items-center bg-white p-4 rounded-t-lg shadow-sm mb-1 border-b">
             <button @click="changeMonth(-1)" class="text-gray-500 hover:bg-gray-100 px-3 py-1 rounded">&lt; 前月</button>
             <h2 class="text-xl font-bold">{{ currentMonthStr }}</h2>
             <button @click="changeMonth(1)" class="text-gray-500 hover:bg-gray-100 px-3 py-1 rounded">次月 &gt;</button>
         </div>
 
+        <!-- 初期値設定ヘッダー (設定モードの時だけ表示) -->
+        <div v-if="currentMode === 'settings'" class="bg-blue-50 p-4 rounded-t-lg shadow-sm mb-1 border-b text-center">
+            <h2 class="text-lg font-bold text-blue-800">⚙️ 毎月の「初期値（予算）」設定</h2>
+            <p class="text-xs text-blue-600 mt-1">ここで設定した内容は、新しく月を開いた際のベースになります。</p>
+        </div>
+
+        <!-- 共通入力エリア -->
         <div class="bg-white p-4 rounded-b-lg shadow-sm mb-6 relative">
-            <div v-if="currentMonthData.isClosed" class="absolute inset-0 bg-gray-50 bg-opacity-70 flex items-center justify-center z-10 rounded-b-lg">
+            
+            <div v-if="isFormDisabled" class="absolute inset-0 bg-gray-50 bg-opacity-70 flex items-center justify-center z-10 rounded-b-lg">
                 <div class="text-center">
                     <span class="bg-green-100 text-green-800 font-bold px-4 py-2 rounded-full border border-green-300 shadow">この月は確定済みです</span>
                 </div>
@@ -67,76 +77,77 @@
             <!-- 収入 -->
             <div class="flex justify-between items-center mb-3 border-b-2 border-blue-100 pb-1">
                 <h3 class="font-bold text-blue-600">収入項目 (計: ¥{{ totalIncome.toLocaleString() }})</h3>
-                <button v-if="!currentMonthData.isClosed" @click="addItem('incomes')" class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1 rounded">＋ 追加</button>
+                <button v-if="!isFormDisabled" @click="addItem('incomes')" class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1 rounded">＋ 追加</button>
             </div>
             <div class="space-y-2 mb-6">
-                <div v-for="(item, index) in currentMonthData.incomes" :key="'in'+index" class="flex items-center gap-1.5">
-                    <input v-model="item.name" class="w-[42%] border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
-                    <input v-model.number="item.amount" type="number" class="w-[42%] border-gray-300 border rounded px-2 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
+                <div v-for="(item, index) in activeData.incomes" :key="'in'+index" class="flex items-center gap-1.5">
+                    <input v-model="item.name" class="w-[42%] border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="isFormDisabled">
+                    <input v-model.number="item.amount" type="number" class="w-[42%] border-gray-300 border rounded px-2 py-1 text-right text-sm font-mono" :disabled="isFormDisabled">
                     <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
-                    <button v-if="!currentMonthData.isClosed" @click="removeItem('incomes', index)" class="w-[6%] text-gray-400 hover:text-red-500 font-bold text-center">×</button>
+                    <button v-if="!isFormDisabled" @click="removeItem('incomes', index)" class="w-[6%] text-gray-400 hover:text-red-500 font-bold text-center">×</button>
                 </div>
             </div>
 
             <!-- 支出 -->
             <div class="flex justify-between items-center mb-3 border-b-2 border-red-100 pb-1">
                 <h3 class="font-bold text-red-600">支出項目 (計: ¥{{ totalExpense.toLocaleString() }})</h3>
-                <button v-if="!currentMonthData.isClosed" @click="addItem('expenses')" class="text-xs bg-red-50 text-red-600 border border-red-200 px-2 py-1 rounded">＋ 追加</button>
+                <button v-if="!isFormDisabled" @click="addItem('expenses')" class="text-xs bg-red-50 text-red-600 border border-red-200 px-2 py-1 rounded">＋ 追加</button>
             </div>
             <div class="space-y-2 mb-6">
-                <div v-for="(item, index) in currentMonthData.expenses" :key="'out'+index" class="flex items-center gap-1.5">
-                    <input v-model="item.name" class="w-[42%] border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
-                    <input v-model.number="item.amount" type="number" class="w-[42%] border-gray-300 border rounded px-2 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
+                <div v-for="(item, index) in activeData.expenses" :key="'out'+index" class="flex items-center gap-1.5">
+                    <input v-model="item.name" class="w-[42%] border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="isFormDisabled">
+                    <input v-model.number="item.amount" type="number" class="w-[42%] border-gray-300 border rounded px-2 py-1 text-right text-sm font-mono" :disabled="isFormDisabled">
                     <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
-                    <button v-if="!currentMonthData.isClosed" @click="removeItem('expenses', index)" class="w-[6%] text-gray-400 hover:text-red-500 font-bold text-center">×</button>
+                    <button v-if="!isFormDisabled" @click="removeItem('expenses', index)" class="w-[6%] text-gray-400 hover:text-red-500 font-bold text-center">×</button>
                 </div>
             </div>
 
             <!-- 繰入 -->
             <div class="flex justify-between items-center mb-3 border-b-2 border-yellow-100 pb-1">
                 <h3 class="font-bold text-yellow-600">繰入（積立などへ） (計: ¥{{ totalTransferIn.toLocaleString() }})</h3>
-                <button v-if="!currentMonthData.isClosed" @click="addItem('transfersIn')" class="text-xs bg-yellow-50 text-yellow-700 border border-yellow-200 px-2 py-1 rounded">＋ 追加</button>
+                <button v-if="!isFormDisabled" @click="addItem('transfersIn')" class="text-xs bg-yellow-50 text-yellow-700 border border-yellow-200 px-2 py-1 rounded">＋ 追加</button>
             </div>
             <div class="space-y-2 mb-6">
-                <div v-for="(item, index) in currentMonthData.transfersIn" :key="'trin'+index" class="flex items-center gap-1.5">
-                    <input v-model="item.name" class="w-[32%] border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
-                    <select v-model="item.target" class="w-[24%] border-gray-300 border rounded px-1 py-1 text-xs bg-gray-50 text-gray-700" :disabled="currentMonthData.isClosed">
+                <div v-for="(item, index) in activeData.transfersIn" :key="'trin'+index" class="flex items-center gap-1.5">
+                    <input v-model="item.name" class="w-[32%] border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="isFormDisabled">
+                    <select v-model="item.target" class="w-[24%] border-gray-300 border rounded px-1 py-1 text-xs bg-gray-50 text-gray-700" :disabled="isFormDisabled">
                         <option value="annual">年間積立</option>
                         <option value="travel">旅行積立</option>
                         <option value="savings">貯蓄口座</option>
                     </select>
-                    <input v-model.number="item.amount" type="number" class="w-[30%] border-gray-300 border rounded px-2 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
+                    <input v-model.number="item.amount" type="number" class="w-[30%] border-gray-300 border rounded px-2 py-1 text-right text-sm font-mono" :disabled="isFormDisabled">
                     <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
-                    <button v-if="!currentMonthData.isClosed" @click="removeItem('transfersIn', index)" class="w-[4%] text-gray-400 hover:text-red-500 font-bold text-center">×</button>
+                    <button v-if="!isFormDisabled" @click="removeItem('transfersIn', index)" class="w-[4%] text-gray-400 hover:text-red-500 font-bold text-center">×</button>
                 </div>
             </div>
 
             <!-- 引出し -->
             <div class="flex justify-between items-center mb-3 border-b-2 border-purple-100 pb-1">
                 <h3 class="font-bold text-purple-600">引出し（積立などから） (計: ¥{{ totalTransferOut.toLocaleString() }})</h3>
-                <button v-if="!currentMonthData.isClosed" @click="addItem('transfersOut')" class="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-2 py-1 rounded">＋ 追加</button>
+                <button v-if="!isFormDisabled" @click="addItem('transfersOut')" class="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-2 py-1 rounded">＋ 追加</button>
             </div>
             <div class="space-y-2 mb-6">
-                <div v-for="(item, index) in currentMonthData.transfersOut" :key="'trout'+index" class="flex items-center gap-1.5">
-                    <input v-model="item.name" class="w-[32%] border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
-                    <select v-model="item.target" class="w-[24%] border-gray-300 border rounded px-1 py-1 text-xs bg-gray-50 text-gray-700" :disabled="currentMonthData.isClosed">
+                <div v-for="(item, index) in activeData.transfersOut" :key="'trout'+index" class="flex items-center gap-1.5">
+                    <input v-model="item.name" class="w-[32%] border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="isFormDisabled">
+                    <select v-model="item.target" class="w-[24%] border-gray-300 border rounded px-1 py-1 text-xs bg-gray-50 text-gray-700" :disabled="isFormDisabled">
                         <option value="annual">年間積立</option>
                         <option value="travel">旅行積立</option>
                         <option value="savings">貯蓄口座</option>
                     </select>
-                    <input v-model.number="item.amount" type="number" class="w-[30%] border-gray-300 border rounded px-2 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
+                    <input v-model.number="item.amount" type="number" class="w-[30%] border-gray-300 border rounded px-2 py-1 text-right text-sm font-mono" :disabled="isFormDisabled">
                     <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
-                    <button v-if="!currentMonthData.isClosed" @click="removeItem('transfersOut', index)" class="w-[4%] text-gray-400 hover:text-red-500 font-bold text-center">×</button>
+                    <button v-if="!isFormDisabled" @click="removeItem('transfersOut', index)" class="w-[4%] text-gray-400 hover:text-red-500 font-bold text-center">×</button>
                 </div>
             </div>
 
-            <div class="bg-gray-100 p-4 rounded flex justify-between items-center mb-6 border border-gray-200">
-                <span class="font-bold">当月残高 (貯蓄口座への入金予定額)</span>
+            <div v-if="currentMode === 'monthly'" class="bg-gray-100 p-4 rounded flex justify-between items-center mb-6 border border-gray-200">
+                <span class="font-bold">当月残高 (貯蓄への入金予定)</span>
                 <span class="text-xl font-bold" :class="currentMonthNet >= 0 ? 'text-blue-600' : 'text-red-600'">¥{{ currentMonthNet.toLocaleString() }}</span>
             </div>
         </div>
 
-        <div class="flex gap-4">
+        <!-- 月次モードのボタン -->
+        <div v-if="currentMode === 'monthly'" class="flex gap-4">
             <button v-if="!currentMonthData.isClosed" @click="closeMonth" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded shadow-lg transition-colors">
                 この月の収支を確定する
             </button>
@@ -144,6 +155,17 @@
                 確定をキャンセル
             </button>
         </div>
+
+        <!-- 設定モードのボタン -->
+        <div v-if="currentMode === 'settings'" class="flex gap-4">
+            <button @click="applySettingsAndClose" class="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 px-4 rounded shadow-lg transition-colors">
+                未確定月に適用して戻る
+            </button>
+            <button @click="currentMode = 'monthly'" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-3 px-4 rounded transition-colors">
+                適用せずに戻る
+            </button>
+        </div>
+
     </div>
 
     <script>
@@ -151,7 +173,6 @@
         const { createApp, ref, computed, watch, onMounted } = Vue;
 
         const defaultData = {
-            isClosed: false,
             incomes: [
                 {name: '前月繰越', amount: 0},
                 {name: '給与', amount: 455000},
@@ -186,6 +207,9 @@
                 const currentDate = ref(new Date());
                 const accounts = ref({ savings: 0, annual: 0, travel: 0 });
                 const monthsData = ref({});
+                const baseSettings = ref(JSON.parse(JSON.stringify(defaultData))); // 初期値マスター
+                const currentMode = ref('monthly'); // 'monthly' または 'settings'
+                
                 const isLoading = ref(true);
                 const isSaving = ref(false);
                 let saveTimeout = null;
@@ -200,28 +224,45 @@
                     return `${currentDate.value.getFullYear()}年 ${currentDate.value.getMonth() + 1}月`;
                 });
 
+                // 指定月のデータが無ければマスター(baseSettings)から作成
                 const currentMonthData = computed(() => {
                     const key = currentMonthKey.value;
                     if (!monthsData.value[key]) {
-                        monthsData.value[key] = JSON.parse(JSON.stringify(defaultData));
+                        monthsData.value[key] = {
+                            isClosed: false,
+                            incomes: JSON.parse(JSON.stringify(baseSettings.value.incomes)),
+                            expenses: JSON.parse(JSON.stringify(baseSettings.value.expenses)),
+                            transfersIn: JSON.parse(JSON.stringify(baseSettings.value.transfersIn)),
+                            transfersOut: JSON.parse(JSON.stringify(baseSettings.value.transfersOut))
+                        };
                     }
                     return monthsData.value[key];
+                });
+
+                // モードに応じて、画面に表示・編集するデータを切り替える（重要）
+                const activeData = computed(() => {
+                    return currentMode.value === 'settings' ? baseSettings.value : currentMonthData.value;
+                });
+
+                const isFormDisabled = computed(() => {
+                    return currentMode.value === 'monthly' && currentMonthData.value.isClosed;
                 });
 
                 const loadData = async () => {
                     try {
                         const response = await fetch(API_URL);
                         const data = await response.json();
-                        if (data && data.accounts) {
-                            accounts.value = data.accounts;
-                        }
+                        if (data && data.accounts) accounts.value = data.accounts;
+                        if (data && data.baseSettings) baseSettings.value = data.baseSettings;
+                        
                         if (data && data.monthsData) {
+                            // 古いデータ構造の補完
                             Object.keys(data.monthsData).forEach(k => {
                                 const m = data.monthsData[k];
-                                if (!m.incomes) m.incomes = JSON.parse(JSON.stringify(defaultData.incomes));
-                                if (!m.expenses) m.expenses = JSON.parse(JSON.stringify(defaultData.expenses));
-                                if (!m.transfersIn) m.transfersIn = m.transfers ? m.transfers : JSON.parse(JSON.stringify(defaultData.transfersIn));
-                                if (!m.transfersOut) m.transfersOut = JSON.parse(JSON.stringify(defaultData.transfersOut));
+                                if (!m.incomes) m.incomes = JSON.parse(JSON.stringify(baseSettings.value.incomes));
+                                if (!m.expenses) m.expenses = JSON.parse(JSON.stringify(baseSettings.value.expenses));
+                                if (!m.transfersIn) m.transfersIn = m.transfers ? m.transfers : JSON.parse(JSON.stringify(baseSettings.value.transfersIn));
+                                if (!m.transfersOut) m.transfersOut = JSON.parse(JSON.stringify(baseSettings.value.transfersOut));
                             });
                             monthsData.value = data.monthsData;
                         }
@@ -238,7 +279,11 @@
                         await fetch(API_URL, {
                             method: 'POST',
                             headers: { 'Content-Type': 'text/plain' },
-                            body: JSON.stringify({ accounts: accounts.value, monthsData: monthsData.value })
+                            body: JSON.stringify({ 
+                                accounts: accounts.value, 
+                                monthsData: monthsData.value,
+                                baseSettings: baseSettings.value 
+                            })
                         });
                     } catch (e) {
                         console.error(e);
@@ -247,17 +292,18 @@
                     }
                 };
 
-                watch([monthsData, accounts], () => {
+                // データに変更があったら自動保存
+                watch([monthsData, accounts, baseSettings], () => {
                     if (isLoading.value) return;
                     clearTimeout(saveTimeout);
                     isSaving.value = true;
                     saveTimeout = setTimeout(saveData, 1500);
                 }, { deep: true });
 
-                const totalIncome = computed(() => (currentMonthData.value.incomes || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
-                const totalExpense = computed(() => (currentMonthData.value.expenses || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
-                const totalTransferIn = computed(() => (currentMonthData.value.transfersIn || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
-                const totalTransferOut = computed(() => (currentMonthData.value.transfersOut || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
+                const totalIncome = computed(() => (activeData.value.incomes || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
+                const totalExpense = computed(() => (activeData.value.expenses || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
+                const totalTransferIn = computed(() => (activeData.value.transfersIn || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
+                const totalTransferOut = computed(() => (activeData.value.transfersOut || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
                 
                 const currentMonthNet = computed(() => totalIncome.value - totalExpense.value - totalTransferIn.value + totalTransferOut.value);
 
@@ -268,7 +314,7 @@
                 };
 
                 const addItem = (type) => {
-                    const list = currentMonthData.value[type];
+                    const list = activeData.value[type];
                     if (type.startsWith('transfers')) {
                         list.push({ name: '新規項目', amount: 0, target: 'annual' });
                     } else {
@@ -277,58 +323,16 @@
                 };
 
                 const removeItem = (type, index) => {
-                    currentMonthData.value[type].splice(index, 1);
+                    activeData.value[type].splice(index, 1);
                 };
 
-                const closeMonth = () => {
-                    if (currentMonthData.value.isClosed) return;
-                    if (confirm(`${currentMonthStr.value}の収支を確定しますか？\n残高の¥${currentMonthNet.value.toLocaleString()}は貯蓄口座に移動します。`)) {
-                        (currentMonthData.value.transfersIn || []).forEach(t => {
-                            if (accounts.value[t.target] !== undefined) accounts.value[t.target] += (Number(t.amount) || 0);
-                        });
-                        (currentMonthData.value.transfersOut || []).forEach(t => {
-                            if (accounts.value[t.target] !== undefined) accounts.value[t.target] -= (Number(t.amount) || 0);
-                        });
-                        accounts.value.savings += currentMonthNet.value;
-                        currentMonthData.value.isClosed = true;
-                        saveData();
-                    }
-                };
-
-                const cancelCloseMonth = () => {
-                    if (!currentMonthData.value.isClosed) return;
-                    if (confirm('確定をキャンセルして再編集可能にしますか？')) {
-                        (currentMonthData.value.transfersIn || []).forEach(t => {
-                            if (accounts.value[t.target] !== undefined) accounts.value[t.target] -= (Number(t.amount) || 0);
-                        });
-                        (currentMonthData.value.transfersOut || []).forEach(t => {
-                            if (accounts.value[t.target] !== undefined) accounts.value[t.target] += (Number(t.amount) || 0);
-                        });
-                        accounts.value.savings -= currentMonthNet.value;
-                        currentMonthData.value.isClosed = false;
-                        saveData();
-                    }
-                };
-
-                const exportData = () => {
-                    const blob = new Blob([JSON.stringify({ accounts: accounts.value, monthsData: monthsData.value }, null, 2)], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `budget_backup_${currentMonthKey.value}.json`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                };
-
-                onMounted(loadData);
-
-                return {
-                    currentMonthStr, currentMonthData, accounts, isLoading, isSaving,
-                    totalIncome, totalExpense, totalTransferIn, totalTransferOut, currentMonthNet,
-                    changeMonth, closeMonth, cancelCloseMonth, exportData, addItem, removeItem
-                };
-            }
-        }).mount('#app');
-    </script>
-</body>
-</html>
+                // 初期値を未確定の月すべてに上書き適用する
+                const applySettingsAndClose = () => {
+                    if(confirm("ここで設定した初期値を、現在「未確定」のすべての月に上書き反映しますか？\n※確定済みの月には影響しません。")) {
+                        Object.keys(monthsData.value).forEach(key => {
+                            if (!monthsData.value[key].isClosed) {
+                                monthsData.value[key].incomes = JSON.parse(JSON.stringify(baseSettings.value.incomes));
+                                monthsData.value[key].expenses = JSON.parse(JSON.stringify(baseSettings.value.expenses));
+                                monthsData.value[key].transfersIn = JSON.parse(JSON.stringify(baseSettings.value.transfersIn));
+                                monthsData.value[key].transfersOut = JSON.parse(JSON.stringify(baseSettings.value.transfersOut));
+        
