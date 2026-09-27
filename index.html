@@ -14,17 +14,20 @@
 <body class="text-gray-800">
     <div id="app" v-cloak class="max-w-3xl mx-auto p-4 pb-20">
         
+        <!-- ローディング画面 -->
+        <div v-if="isLoading" class="fixed inset-0 bg-white bg-opacity-90 flex items-center justify-center z-50">
+            <div class="text-xl font-bold text-blue-600">クラウドからデータを読み込み中...</div>
+        </div>
+
         <header class="mb-6 flex justify-between items-end border-b pb-4 border-gray-300">
             <div>
                 <h1 class="text-2xl font-bold text-blue-800">家計管理ダッシュボード</h1>
-                <p class="text-sm text-gray-500">データはブラウザ内に保存されます</p>
+                <p class="text-sm font-bold mt-1" :class="isSaving ? 'text-yellow-600' : 'text-green-600'">
+                    {{ isSaving ? '☁️ クラウドへ保存中...' : '✅ クラウド同期済' }}
+                </p>
             </div>
             <div class="flex gap-2 text-sm">
                 <button @click="exportData" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">エクスポート</button>
-                <label class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded cursor-pointer">
-                    インポート
-                    <input type="file" accept=".json" class="hidden" @change="importData">
-                </label>
             </div>
         </header>
 
@@ -96,7 +99,6 @@
                 <span class="font-bold">当月残高 (貯蓄口座への入金予定額)</span>
                 <span class="text-xl font-bold" :class="currentMonthNet >= 0 ? 'text-blue-600' : 'text-red-600'">¥{{ currentMonthNet.toLocaleString() }}</span>
             </div>
-
         </div>
 
         <div class="flex gap-4">
@@ -107,10 +109,12 @@
                 確定をキャンセル
             </button>
         </div>
-
     </div>
 
     <script>
+        // 設定されたAPI URL
+        const API_URL = 'https://script.google.com/macros/s/AKfycbyoLp0RJlzwZUGya4yY_Q32HtgXxt-m01Hf8tsfpwEUEuChrk9hmcycGBTZ4w2UFyVg/exec';
+
         const { createApp, ref, computed, watch, onMounted } = Vue;
 
         const defaultIncomes = [
@@ -150,27 +154,59 @@
                 const currentDate = ref(new Date());
                 const accounts = ref({ savings: 0, annual: 0, travel: 0 });
                 const monthsData = ref({});
+                const isLoading = ref(true);
+                const isSaving = ref(false);
+                let saveTimeout = null;
 
-                const loadData = () => {
-                    const saved = localStorage.getItem('budgetAppData');
-                    if (saved) {
-                        const parsed = JSON.parse(saved);
-                        accounts.value = parsed.accounts || { savings: 0, annual: 0, travel: 0 };
-                        monthsData.value = parsed.monthsData || {};
+                // スプレッドシートからデータを取得
+                const loadData = async () => {
+                    try {
+                        const response = await fetch(API_URL);
+                        const data = await response.json();
+                        if (data && data.accounts && data.monthsData) {
+                            accounts.value = data.accounts;
+                            monthsData.value = data.monthsData;
+                        }
+                    } catch (error) {
+                        console.error('データの読み込みに失敗しました', error);
+                        alert('クラウドからのデータ読み込みに失敗しました。');
+                    } finally {
+                        isLoading.value = false;
                     }
                 };
 
-                const saveData = () => {
+                // スプレッドシートへデータを保存
+                const saveDataToCloud = async () => {
+                    isSaving.value = true;
                     const dataToSave = {
                         accounts: accounts.value,
                         monthsData: monthsData.value
                     };
-                    localStorage.setItem('budgetAppData', JSON.stringify(dataToSave));
+                    try {
+                        await fetch(API_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'text/plain' }, // CORS回避のためtext/plain
+                            body: JSON.stringify(dataToSave)
+                        });
+                    } catch (error) {
+                        console.error('データの保存に失敗しました', error);
+                    } finally {
+                        isSaving.value = false;
+                    }
                 };
 
-                // Auto-save on data change
-                watch(monthsData, saveData, { deep: true });
-                watch(accounts, saveData, { deep: true });
+                // 入力があるたびに1.5秒待ってから自動保存
+                const triggerSave = () => {
+                    if (isLoading.value) return; // 読み込み中は保存処理を走らせない
+                    clearTimeout(saveTimeout);
+                    isSaving.value = true;
+                    saveTimeout = setTimeout(() => {
+                        saveDataToCloud();
+                    }, 1500);
+                };
+
+                watch(monthsData, triggerSave, { deep: true });
+                watch(accounts, triggerSave, { deep: true });
 
                 const currentMonthKey = computed(() => {
                     const y = currentDate.value.getFullYear();
@@ -207,34 +243,26 @@
                 const closeMonth = () => {
                     if(currentMonthData.value.isClosed) return;
                     if(confirm(`${currentMonthStr.value}の収支を確定しますか？\n残高の¥${currentMonthNet.value.toLocaleString()}は貯蓄口座に移動します。`)) {
-                        
-                        // 振替処理
                         currentMonthData.value.transfers.forEach(t => {
                             if(t.target === 'annual') accounts.value.annual += (Number(t.amount) || 0);
                             if(t.target === 'travel') accounts.value.travel += (Number(t.amount) || 0);
                         });
-
-                        // 貯蓄処理
                         accounts.value.savings += currentMonthNet.value;
                         currentMonthData.value.isClosed = true;
-                        saveData();
+                        triggerSave();
                     }
                 };
 
                 const cancelCloseMonth = () => {
                     if(!currentMonthData.value.isClosed) return;
                     if(confirm(`確定をキャンセルして再編集可能にしますか？\n口座に反映された金額は元に戻ります。`)) {
-                        
-                        // 振替取消
                         currentMonthData.value.transfers.forEach(t => {
                             if(t.target === 'annual') accounts.value.annual -= (Number(t.amount) || 0);
                             if(t.target === 'travel') accounts.value.travel -= (Number(t.amount) || 0);
                         });
-
-                        // 貯蓄取消
                         accounts.value.savings -= currentMonthNet.value;
                         currentMonthData.value.isClosed = false;
-                        saveData();
+                        triggerSave();
                     }
                 };
 
@@ -249,36 +277,14 @@
                     URL.revokeObjectURL(url);
                 };
 
-                const importData = (event) => {
-                    const file = event.target.files[0];
-                    if (!file) return;
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        try {
-                            const parsed = JSON.parse(e.target.result);
-                            if(parsed.accounts && parsed.monthsData) {
-                                accounts.value = parsed.accounts;
-                                monthsData.value = parsed.monthsData;
-                                saveData();
-                                alert("データを復元しました。");
-                            } else {
-                                alert("不正なファイルフォーマットです。");
-                            }
-                        } catch (err) {
-                            alert("ファイルの読み込みに失敗しました。");
-                        }
-                    };
-                    reader.readAsText(file);
-                };
-
                 onMounted(() => {
                     loadData();
                 });
 
                 return {
-                    currentMonthStr, currentMonthData, accounts,
+                    currentMonthStr, currentMonthData, accounts, isLoading, isSaving,
                     totalIncome, totalExpense, totalTransfer, currentMonthNet,
-                    changeMonth, closeMonth, cancelCloseMonth, exportData, importData
+                    changeMonth, closeMonth, cancelCloseMonth, exportData
                 };
             }
         }).mount('#app');
