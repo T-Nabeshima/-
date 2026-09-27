@@ -173,13 +173,11 @@
             {name: '教育積立', amount: 10000}
         ];
 
-        // 繰入（残高から各口座へマイナス）
         const defaultTransfersIn = [
             {name: '年間積立へ繰入', amount: 65000, target: 'annual'},
             {name: '旅行積立へ繰入', amount: 0, target: 'travel'}
         ];
 
-        // 引出し（各口座から残高へプラス）
         const defaultTransfersOut = [
             {name: '年間積立から引出', amount: 0, target: 'annual'},
             {name: '旅行積立から引出', amount: 0, target: 'travel'}
@@ -192,6 +190,11 @@
             transfersIn: JSON.parse(JSON.stringify(defaultTransfersIn)),
             transfersOut: JSON.parse(JSON.stringify(defaultTransfersOut))
         });
+
+        // データが欠損していてもエラーで止まらないように安全に計算する関数
+        const safeSum = (arr) => {
+            return (arr && Array.isArray(arr)) ? arr.reduce((sum, item) => sum + (Number(item.amount) || 0), 0) : 0;
+        };
 
         createApp({
             setup() {
@@ -263,22 +266,22 @@
                     if (!monthsData.value[key]) {
                         monthsData.value[key] = createNewMonthData();
                     } else {
-                        // 古いデータ構造からの自動移行処理（後方互換性）
-                        if (monthsData.value[key].transfers && !monthsData.value[key].transfersIn) {
-                            monthsData.value[key].transfersIn = monthsData.value[key].transfers;
+                        // データ構造が古い場合、安全に最新構造に修正する
+                        if (!monthsData.value[key].transfersIn) {
+                            monthsData.value[key].transfersIn = monthsData.value[key].transfers ? monthsData.value[key].transfers : JSON.parse(JSON.stringify(defaultTransfersIn));
+                        }
+                        if (!monthsData.value[key].transfersOut) {
                             monthsData.value[key].transfersOut = JSON.parse(JSON.stringify(defaultTransfersOut));
-                            delete monthsData.value[key].transfers;
                         }
                     }
                     return monthsData.value[key];
                 });
 
-                const totalIncome = computed(() => currentMonthData.value.incomes.reduce((sum, item) => sum + (Number(item.amount) || 0), 0));
-                const totalExpense = computed(() => currentMonthData.value.expenses.reduce((sum, item) => sum + (Number(item.amount) || 0), 0));
-                const totalTransferIn = computed(() => currentMonthData.value.transfersIn.reduce((sum, item) => sum + (Number(item.amount) || 0), 0));
-                const totalTransferOut = computed(() => currentMonthData.value.transfersOut.reduce((sum, item) => sum + (Number(item.amount) || 0), 0));
+                const totalIncome = computed(() => safeSum(currentMonthData.value.incomes));
+                const totalExpense = computed(() => safeSum(currentMonthData.value.expenses));
+                const totalTransferIn = computed(() => safeSum(currentMonthData.value.transfersIn));
+                const totalTransferOut = computed(() => safeSum(currentMonthData.value.transfersOut));
                 
-                // 当月残高 ＝ 収入 − 支出 − 繰入（積立等へ） ＋ 引出し（積立等から）
                 const currentMonthNet = computed(() => {
                     return totalIncome.value - totalExpense.value - totalTransferIn.value + totalTransferOut.value;
                 });
@@ -289,30 +292,34 @@
                     currentDate.value = newDate;
                 };
 
-                // 項目の追加と削除
                 const addItem = (list, type) => {
+                    if (!list) return;
                     if (type === 'transfer') {
                         list.push({name: '新規項目', amount: 0, target: 'annual'});
                     } else {
                         list.push({name: '新規項目', amount: 0});
                     }
                 };
+                
                 const removeItem = (list, index) => {
-                    list.splice(index, 1);
+                    if (list) list.splice(index, 1);
                 };
 
                 const closeMonth = () => {
                     if(currentMonthData.value.isClosed) return;
                     if(confirm(`${currentMonthStr.value}の収支を確定しますか？\n残高の¥${currentMonthNet.value.toLocaleString()}は貯蓄口座に移動します。`)) {
                         
-                        // 繰入（口座残高を増やす）
-                        currentMonthData.value.transfersIn.forEach(t => {
-                            if(accounts.value[t.target] !== undefined) accounts.value[t.target] += (Number(t.amount) || 0);
-                        });
-                        // 引出し（口座残高を減らす）
-                        currentMonthData.value.transfersOut.forEach(t => {
-                            if(accounts.value[t.target] !== undefined) accounts.value[t.target] -= (Number(t.amount) || 0);
-                        });
+                        if (currentMonthData.value.transfersIn) {
+                            currentMonthData.value.transfersIn.forEach(t => {
+                                if(accounts.value[t.target] !== undefined) accounts.value[t.target] += (Number(t.amount) || 0);
+                            });
+                        }
+                        
+                        if (currentMonthData.value.transfersOut) {
+                            currentMonthData.value.transfersOut.forEach(t => {
+                                if(accounts.value[t.target] !== undefined) accounts.value[t.target] -= (Number(t.amount) || 0);
+                            });
+                        }
 
                         accounts.value.savings += currentMonthNet.value;
                         currentMonthData.value.isClosed = true;
@@ -324,14 +331,17 @@
                     if(!currentMonthData.value.isClosed) return;
                     if(confirm(`確定をキャンセルして再編集可能にしますか？\n口座に反映された金額は元に戻ります。`)) {
                         
-                        // 繰入の取り消し（口座残高を減らす）
-                        currentMonthData.value.transfersIn.forEach(t => {
-                            if(accounts.value[t.target] !== undefined) accounts.value[t.target] -= (Number(t.amount) || 0);
-                        });
-                        // 引出しの取り消し（口座残高を増やす）
-                        currentMonthData.value.transfersOut.forEach(t => {
-                            if(accounts.value[t.target] !== undefined) accounts.value[t.target] += (Number(t.amount) || 0);
-                        });
+                        if (currentMonthData.value.transfersIn) {
+                            currentMonthData.value.transfersIn.forEach(t => {
+                                if(accounts.value[t.target] !== undefined) accounts.value[t.target] -= (Number(t.amount) || 0);
+                            });
+                        }
+                        
+                        if (currentMonthData.value.transfersOut) {
+                            currentMonthData.value.transfersOut.forEach(t => {
+                                if(accounts.value[t.target] !== undefined) accounts.value[t.target] += (Number(t.amount) || 0);
+                            });
+                        }
 
                         accounts.value.savings -= currentMonthNet.value;
                         currentMonthData.value.isClosed = false;
@@ -345,14 +355,4 @@
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `budget_backup_${currentMonthKey.value}.json`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                };
-
-                onMounted(() => {
-                    loadData();
-                });
-
-                return {
-                    currentMonthStr, currentMonthData,
+                    a.download = `budget_b
