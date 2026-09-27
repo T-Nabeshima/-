@@ -191,7 +191,6 @@
             transfersOut: JSON.parse(JSON.stringify(defaultTransfersOut))
         });
 
-        // データが欠損していてもエラーで止まらないように安全に計算する関数
         const safeSum = (arr) => {
             return (arr && Array.isArray(arr)) ? arr.reduce((sum, item) => sum + (Number(item.amount) || 0), 0) : 0;
         };
@@ -205,17 +204,55 @@
                 const isSaving = ref(false);
                 let saveTimeout = null;
 
+                const currentMonthKey = computed(() => {
+                    const y = currentDate.value.getFullYear();
+                    const m = String(currentDate.value.getMonth() + 1).padStart(2, '0');
+                    return `${y}-${m}`;
+                });
+
+                const currentMonthStr = computed(() => {
+                    return `${currentDate.value.getFullYear()}年 ${currentDate.value.getMonth() + 1}月`;
+                });
+
+                // 指定した月のデータが存在するか確認し、無ければ作る（安全な処理）
+                const ensureMonthData = (key) => {
+                    if (!monthsData.value[key]) {
+                        monthsData.value[key] = createNewMonthData();
+                    }
+                };
+
+                const currentMonthData = computed(() => {
+                    return monthsData.value[currentMonthKey.value] || createNewMonthData();
+                });
+
+                // 月が切り替わった時にデータを準備する
+                watch(currentMonthKey, (newKey) => {
+                    ensureMonthData(newKey);
+                });
+
                 const loadData = async () => {
                     try {
                         const response = await fetch(API_URL);
                         const data = await response.json();
                         if (data && data.accounts && data.monthsData) {
                             accounts.value = data.accounts;
+                            
+                            // 過去データの自動修復（マイグレーション）
+                            Object.keys(data.monthsData).forEach(key => {
+                                const month = data.monthsData[key];
+                                if (!month.transfersIn) {
+                                    month.transfersIn = month.transfers ? month.transfers : JSON.parse(JSON.stringify(defaultTransfersIn));
+                                }
+                                if (!month.transfersOut) {
+                                    month.transfersOut = JSON.parse(JSON.stringify(defaultTransfersOut));
+                                }
+                            });
                             monthsData.value = data.monthsData;
                         }
                     } catch (error) {
                         console.error('データの読み込みに失敗しました', error);
                     } finally {
+                        ensureMonthData(currentMonthKey.value);
                         isLoading.value = false;
                     }
                 };
@@ -250,32 +287,6 @@
 
                 watch(monthsData, triggerSave, { deep: true });
                 watch(accounts, triggerSave, { deep: true });
-
-                const currentMonthKey = computed(() => {
-                    const y = currentDate.value.getFullYear();
-                    const m = String(currentDate.value.getMonth() + 1).padStart(2, '0');
-                    return `${y}-${m}`;
-                });
-
-                const currentMonthStr = computed(() => {
-                    return `${currentDate.value.getFullYear()}年 ${currentDate.value.getMonth() + 1}月`;
-                });
-
-                const currentMonthData = computed(() => {
-                    const key = currentMonthKey.value;
-                    if (!monthsData.value[key]) {
-                        monthsData.value[key] = createNewMonthData();
-                    } else {
-                        // データ構造が古い場合、安全に最新構造に修正する
-                        if (!monthsData.value[key].transfersIn) {
-                            monthsData.value[key].transfersIn = monthsData.value[key].transfers ? monthsData.value[key].transfers : JSON.parse(JSON.stringify(defaultTransfersIn));
-                        }
-                        if (!monthsData.value[key].transfersOut) {
-                            monthsData.value[key].transfersOut = JSON.parse(JSON.stringify(defaultTransfersOut));
-                        }
-                    }
-                    return monthsData.value[key];
-                });
 
                 const totalIncome = computed(() => safeSum(currentMonthData.value.incomes));
                 const totalExpense = computed(() => safeSum(currentMonthData.value.expenses));
@@ -314,7 +325,6 @@
                                 if(accounts.value[t.target] !== undefined) accounts.value[t.target] += (Number(t.amount) || 0);
                             });
                         }
-                        
                         if (currentMonthData.value.transfersOut) {
                             currentMonthData.value.transfersOut.forEach(t => {
                                 if(accounts.value[t.target] !== undefined) accounts.value[t.target] -= (Number(t.amount) || 0);
@@ -336,7 +346,6 @@
                                 if(accounts.value[t.target] !== undefined) accounts.value[t.target] -= (Number(t.amount) || 0);
                             });
                         }
-                        
                         if (currentMonthData.value.transfersOut) {
                             currentMonthData.value.transfersOut.forEach(t => {
                                 if(accounts.value[t.target] !== undefined) accounts.value[t.target] += (Number(t.amount) || 0);
@@ -350,9 +359,4 @@
                 };
 
                 const exportData = () => {
-                    const dataToSave = { accounts: accounts.value, monthsData: monthsData.value };
-                    const blob = new Blob([JSON.stringify(dataToSave, null, 2)], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `budget_b
+                    const dataToSave = { 
