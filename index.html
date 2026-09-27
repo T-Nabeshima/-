@@ -70,11 +70,11 @@
                 <button v-if="!currentMonthData.isClosed" @click="addItem('incomes')" class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1 rounded">＋ 追加</button>
             </div>
             <div class="space-y-2 mb-6">
-                <div v-for="(item, index) in currentMonthData.incomes" :key="'in'+index" class="flex items-center gap-2">
-                    <input v-model="item.name" class="flex-1 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
-                    <input v-model.number="item.amount" type="number" class="w-1/3 border-gray-300 border rounded px-2 py-1 text-right font-mono" :disabled="currentMonthData.isClosed">
-                    <span class="text-gray-400 text-sm">円</span>
-                    <button v-if="!currentMonthData.isClosed" @click="removeItem('incomes', index)" class="text-gray-400 hover:text-red-500 px-1 font-bold">×</button>
+                <div v-for="(item, index) in currentMonthData.incomes" :key="'in'+index" class="flex items-center gap-1.5">
+                    <input v-model="item.name" class="w-[42%] border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
+                    <input v-model.number="item.amount" type="number" class="w-[42%] border-gray-300 border rounded px-2 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
+                    <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
+                    <button v-if="!currentMonthData.isClosed" @click="removeItem('incomes', index)" class="w-[6%] text-gray-400 hover:text-red-500 font-bold text-center">×</button>
                 </div>
             </div>
 
@@ -84,11 +84,11 @@
                 <button v-if="!currentMonthData.isClosed" @click="addItem('expenses')" class="text-xs bg-red-50 text-red-600 border border-red-200 px-2 py-1 rounded">＋ 追加</button>
             </div>
             <div class="space-y-2 mb-6">
-                <div v-for="(item, index) in currentMonthData.expenses" :key="'out'+index" class="flex items-center gap-2">
-                    <input v-model="item.name" class="flex-1 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
-                    <input v-model.number="item.amount" type="number" class="w-1/3 border-gray-300 border rounded px-2 py-1 text-right font-mono" :disabled="currentMonthData.isClosed">
-                    <span class="text-gray-400 text-sm">円</span>
-                    <button v-if="!currentMonthData.isClosed" @click="removeItem('expenses', index)" class="text-gray-400 hover:text-red-500 px-1 font-bold">×</button>
+                <div v-for="(item, index) in currentMonthData.expenses" :key="'out'+index" class="flex items-center gap-1.5">
+                    <input v-model="item.name" class="w-[42%] border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
+                    <input v-model.number="item.amount" type="number" class="w-[42%] border-gray-300 border rounded px-2 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
+                    <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
+                    <button v-if="!currentMonthData.isClosed" @click="removeItem('expenses', index)" class="w-[6%] text-gray-400 hover:text-red-500 font-bold text-center">×</button>
                 </div>
             </div>
 
@@ -98,16 +98,16 @@
                 <button v-if="!currentMonthData.isClosed" @click="addItem('transfersIn')" class="text-xs bg-yellow-50 text-yellow-700 border border-yellow-200 px-2 py-1 rounded">＋ 追加</button>
             </div>
             <div class="space-y-2 mb-6">
-                <div v-for="(item, index) in currentMonthData.transfersIn" :key="'trin'+index" class="flex items-center gap-2">
-                    <input v-model="item.name" class="w-1/3 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
-                    <select v-model="item.target" class="w-1/4 border-gray-300 border rounded px-1 py-1 text-sm bg-gray-50 text-gray-700" :disabled="currentMonthData.isClosed">
+                <div v-for="(item, index) in currentMonthData.transfersIn" :key="'trin'+index" class="flex items-center gap-1.5">
+                    <input v-model="item.name" class="w-[32%] border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
+                    <select v-model="item.target" class="w-[24%] border-gray-300 border rounded px-1 py-1 text-xs bg-gray-50 text-gray-700" :disabled="currentMonthData.isClosed">
                         <option value="annual">年間積立</option>
                         <option value="travel">旅行積立</option>
                         <option value="savings">貯蓄口座</option>
                     </select>
-                    <input v-model.number="item.amount" type="number" class="w-1/3 border-gray-300 border rounded px-2 py-1 text-right font-mono" :disabled="currentMonthData.isClosed">
-                    <span class="text-gray-400 text-sm">円</span>
-                    <button v-if="!currentMonthData.isClosed" @click="removeItem('transfersIn', index)" class="text-gray-400 hover:text-red-500 px-1 font-bold">×</button>
+                    <input v-model.number="item.amount" type="number" class="w-[30%] border-gray-300 border rounded px-2 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
+                    <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
+                    <button v-if="!currentMonthData.isClosed" @click="removeItem('transfersIn', index)" class="w-[4%] text-gray-400 hover:text-red-500 font-bold text-center">×</button>
                 </div>
             </div>
 
@@ -117,16 +117,16 @@
                 <button v-if="!currentMonthData.isClosed" @click="addItem('transfersOut')" class="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-2 py-1 rounded">＋ 追加</button>
             </div>
             <div class="space-y-2 mb-6">
-                <div v-for="(item, index) in currentMonthData.transfersOut" :key="'trout'+index" class="flex items-center gap-2">
-                    <input v-model="item.name" class="w-1/3 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
-                    <select v-model="item.target" class="w-1/4 border-gray-300 border rounded px-1 py-1 text-sm bg-gray-50 text-gray-700" :disabled="currentMonthData.isClosed">
+                <div v-for="(item, index) in currentMonthData.transfersOut" :key="'trout'+index" class="flex items-center gap-1.5">
+                    <input v-model="item.name" class="w-[32%] border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
+                    <select v-model="item.target" class="w-[24%] border-gray-300 border rounded px-1 py-1 text-xs bg-gray-50 text-gray-700" :disabled="currentMonthData.isClosed">
                         <option value="annual">年間積立</option>
                         <option value="travel">旅行積立</option>
                         <option value="savings">貯蓄口座</option>
                     </select>
-                    <input v-model.number="item.amount" type="number" class="w-1/3 border-gray-300 border rounded px-2 py-1 text-right font-mono" :disabled="currentMonthData.isClosed">
-                    <span class="text-gray-400 text-sm">円</span>
-                    <button v-if="!currentMonthData.isClosed" @click="removeItem('transfersOut', index)" class="text-gray-400 hover:text-red-500 px-1 font-bold">×</button>
+                    <input v-model.number="item.amount" type="number" class="w-[30%] border-gray-300 border rounded px-2 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
+                    <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
+                    <button v-if="!currentMonthData.isClosed" @click="removeItem('transfersOut', index)" class="w-[4%] text-gray-400 hover:text-red-500 font-bold text-center">×</button>
                 </div>
             </div>
 
