@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>家計・キャッシュフロー管理</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; background-color: #f3f4f6; }
+        [v-cloak] { display: none; }
+    </style>
+</head>
+<body class="text-gray-800">
+    <div id="app" v-cloak class="max-w-3xl mx-auto p-4 pb-20">
+        
+        <header class="mb-6 flex justify-between items-end border-b pb-4 border-gray-300">
+            <div>
+                <h1 class="text-2xl font-bold text-blue-800">家計管理ダッシュボード</h1>
+                <p class="text-sm text-gray-500">データはブラウザ内に保存されます</p>
+            </div>
+            <div class="flex gap-2 text-sm">
+                <button @click="exportData" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">エクスポート</button>
+                <label class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded cursor-pointer">
+                    インポート
+                    <input type="file" accept=".json" class="hidden" @change="importData">
+                </label>
+            </div>
+        </header>
+
+        <!-- 口座残高サマリー -->
+        <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <div class="bg-white p-4 rounded-lg shadow border-t-4 border-blue-500">
+                <div class="text-xs text-gray-500 mb-1">基本口座 (当月残)</div>
+                <div class="text-xl font-bold text-gray-700">¥{{ currentMonthNet.toLocaleString() }}</div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow border-t-4 border-green-500">
+                <div class="text-xs text-gray-500 mb-1">貯蓄口座</div>
+                <div class="text-xl font-bold text-gray-700">¥{{ accounts.savings.toLocaleString() }}</div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow border-t-4 border-yellow-500">
+                <div class="text-xs text-gray-500 mb-1">年間積立</div>
+                <div class="text-xl font-bold text-gray-700">¥{{ accounts.annual.toLocaleString() }}</div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow border-t-4 border-purple-500">
+                <div class="text-xs text-gray-500 mb-1">旅行積立</div>
+                <div class="text-xl font-bold text-gray-700">¥{{ accounts.travel.toLocaleString() }}</div>
+            </div>
+        </section>
+
+        <!-- 月選択 -->
+        <div class="flex justify-between items-center bg-white p-4 rounded-t-lg shadow-sm mb-1 border-b">
+            <button @click="changeMonth(-1)" class="text-gray-500 hover:bg-gray-100 px-3 py-1 rounded">&lt; 前月</button>
+            <h2 class="text-xl font-bold">{{ currentMonthStr }}</h2>
+            <button @click="changeMonth(1)" class="text-gray-500 hover:bg-gray-100 px-3 py-1 rounded">次月 &gt;</button>
+        </div>
+
+        <div class="bg-white p-4 rounded-b-lg shadow-sm mb-6 relative">
+            <div v-if="currentMonthData.isClosed" class="absolute inset-0 bg-gray-50 bg-opacity-70 flex items-center justify-center z-10 rounded-b-lg">
+                <div class="text-center">
+                    <span class="bg-green-100 text-green-800 font-bold px-4 py-2 rounded-full border border-green-300 shadow">この月は確定済みです</span>
+                </div>
+            </div>
+
+            <!-- 収入 -->
+            <h3 class="font-bold text-blue-600 mb-3 border-b-2 border-blue-100 inline-block pb-1">収入項目 (計: ¥{{ totalIncome.toLocaleString() }})</h3>
+            <div class="space-y-2 mb-6">
+                <div v-for="(item, index) in currentMonthData.incomes" :key="'in'+index" class="flex items-center gap-4">
+                    <input v-model="item.name" class="w-1/3 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
+                    <input v-model.number="item.amount" type="number" class="w-1/3 border-gray-300 border rounded px-2 py-1 text-right font-mono" :disabled="currentMonthData.isClosed">
+                    <span class="text-gray-400 text-sm">円</span>
+                </div>
+            </div>
+
+            <!-- 支出 -->
+            <h3 class="font-bold text-red-600 mb-3 border-b-2 border-red-100 inline-block pb-1">支出項目 (計: ¥{{ totalExpense.toLocaleString() }})</h3>
+            <div class="space-y-2 mb-6">
+                <div v-for="(item, index) in currentMonthData.expenses" :key="'out'+index" class="flex items-center gap-4">
+                    <input v-model="item.name" class="w-1/3 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
+                    <input v-model.number="item.amount" type="number" class="w-1/3 border-gray-300 border rounded px-2 py-1 text-right font-mono" :disabled="currentMonthData.isClosed">
+                    <span class="text-gray-400 text-sm">円</span>
+                </div>
+            </div>
+
+            <!-- 振替 -->
+            <h3 class="font-bold text-yellow-600 mb-3 border-b-2 border-yellow-100 inline-block pb-1">積立振替 (計: ¥{{ totalTransfer.toLocaleString() }})</h3>
+            <div class="space-y-2 mb-6">
+                <div v-for="(item, index) in currentMonthData.transfers" :key="'tr'+index" class="flex items-center gap-4">
+                    <input v-model="item.name" class="w-1/3 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
+                    <input v-model.number="item.amount" type="number" class="w-1/3 border-gray-300 border rounded px-2 py-1 text-right font-mono" :disabled="currentMonthData.isClosed">
+                    <span class="text-gray-400 text-sm">円</span>
+                </div>
+            </div>
+
+            <div class="bg-gray-100 p-4 rounded flex justify-between items-center mb-6 border border-gray-200">
+                <span class="font-bold">当月残高 (貯蓄口座への入金予定額)</span>
+                <span class="text-xl font-bold" :class="currentMonthNet >= 0 ? 'text-blue-600' : 'text-red-600'">¥{{ currentMonthNet.toLocaleString() }}</span>
+            </div>
+
+        </div>
+
+        <div class="flex gap-4">
+            <button v-if="!currentMonthData.isClosed" @click="closeMonth" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded shadow-lg transition-colors">
+                この月の収支を確定する
+            </button>
+            <button v-if="currentMonthData.isClosed" @click="cancelCloseMonth" class="flex-1 bg-red-100 hover:bg-red-200 text-red-700 border border-red-300 font-bold py-3 px-4 rounded transition-colors">
+                確定をキャンセル
+            </button>
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp, ref, computed, watch, onMounted } = Vue;
+
+        const defaultIncomes = [
+            {name: '給与', amount: 455000},
+            {name: 'えりな給与', amount: 30000},
+            {name: '子育て支援金', amount: 25000}
+        ];
+        
+        const defaultExpenses = [
+            {name: '管理費', amount: 33000},
+            {name: '住宅ローン', amount: 45681},
+            {name: '軽ローン', amount: 18634},
+            {name: '保育料', amount: 6000},
+            {name: '楽天カード', amount: 35000},
+            {name: 'リクルートカード', amount: 160000},
+            {name: 'ペイペイ', amount: 10000},
+            {name: '現金', amount: 20000},
+            {name: 'スーペイ', amount: 35000},
+            {name: '家具積立', amount: 20000},
+            {name: '教育積立', amount: 10000}
+        ];
+
+        const defaultTransfers = [
+            {name: '年間積立', amount: 65000, target: 'annual'},
+            {name: '旅行積立', amount: 0, target: 'travel'}
+        ];
+
+        const createNewMonthData = () => ({
+            isClosed: false,
+            incomes: JSON.parse(JSON.stringify(defaultIncomes)),
+            expenses: JSON.parse(JSON.stringify(defaultExpenses)),
+            transfers: JSON.parse(JSON.stringify(defaultTransfers))
+        });
+
+        createApp({
+            setup() {
+                const currentDate = ref(new Date());
+                const accounts = ref({ savings: 0, annual: 0, travel: 0 });
+                const monthsData = ref({});
+
+                const loadData = () => {
+                    const saved = localStorage.getItem('budgetAppData');
+                    if (saved) {
+                        const parsed = JSON.parse(saved);
+                        accounts.value = parsed.accounts || { savings: 0, annual: 0, travel: 0 };
+                        monthsData.value = parsed.monthsData || {};
+                    }
+                };
+
+                const saveData = () => {
+                    const dataToSave = {
+                        accounts: accounts.value,
+                        monthsData: monthsData.value
+                    };
+                    localStorage.setItem('budgetAppData', JSON.stringify(dataToSave));
+                };
+
+                // Auto-save on data change
+                watch(monthsData, saveData, { deep: true });
+                watch(accounts, saveData, { deep: true });
+
+                const currentMonthKey = computed(() => {
+                    const y = currentDate.value.getFullYear();
+                    const m = String(currentDate.value.getMonth() + 1).padStart(2, '0');
+                    return `${y}-${m}`;
+                });
+
+                const currentMonthStr = computed(() => {
+                    return `${currentDate.value.getFullYear()}年 ${currentDate.value.getMonth() + 1}月`;
+                });
+
+                const currentMonthData = computed(() => {
+                    const key = currentMonthKey.value;
+                    if (!monthsData.value[key]) {
+                        monthsData.value[key] = createNewMonthData();
+                    }
+                    return monthsData.value[key];
+                });
+
+                const totalIncome = computed(() => currentMonthData.value.incomes.reduce((sum, item) => sum + (Number(item.amount) || 0), 0));
+                const totalExpense = computed(() => currentMonthData.value.expenses.reduce((sum, item) => sum + (Number(item.amount) || 0), 0));
+                const totalTransfer = computed(() => currentMonthData.value.transfers.reduce((sum, item) => sum + (Number(item.amount) || 0), 0));
+                
+                const currentMonthNet = computed(() => {
+                    return totalIncome.value - totalExpense.value - totalTransfer.value;
+                });
+
+                const changeMonth = (delta) => {
+                    const newDate = new Date(currentDate.value);
+                    newDate.setMonth(newDate.getMonth() + delta);
+                    currentDate.value = newDate;
+                };
+
+                const closeMonth = () => {
+                    if(currentMonthData.value.isClosed) return;
+                    if(confirm(`${currentMonthStr.value}の収支を確定しますか？\n残高の¥${currentMonthNet.value.toLocaleString()}は貯蓄口座に移動します。`)) {
+                        
+                        // 振替処理
+                        currentMonthData.value.transfers.forEach(t => {
+                            if(t.target === 'annual') accounts.value.annual += (Number(t.amount) || 0);
+                            if(t.target === 'travel') accounts.value.travel += (Number(t.amount) || 0);
+                        });
+
+                        // 貯蓄処理
+                        accounts.value.savings += currentMonthNet.value;
+                        currentMonthData.value.isClosed = true;
+                        saveData();
+                    }
+                };
+
+                const cancelCloseMonth = () => {
+                    if(!currentMonthData.value.isClosed) return;
+                    if(confirm(`確定をキャンセルして再編集可能にしますか？\n口座に反映された金額は元に戻ります。`)) {
+                        
+                        // 振替取消
+                        currentMonthData.value.transfers.forEach(t => {
+                            if(t.target === 'annual') accounts.value.annual -= (Number(t.amount) || 0);
+                            if(t.target === 'travel') accounts.value.travel -= (Number(t.amount) || 0);
+                        });
+
+                        // 貯蓄取消
+                        accounts.value.savings -= currentMonthNet.value;
+                        currentMonthData.value.isClosed = false;
+                        saveData();
+                    }
+                };
+
+                const exportData = () => {
+                    const dataToSave = { accounts: accounts.value, monthsData: monthsData.value };
+                    const blob = new Blob([JSON.stringify(dataToSave, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `budget_backup_${currentMonthKey.value}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                };
+
+                const importData = (event) => {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const parsed = JSON.parse(e.target.result);
+                            if(parsed.accounts && parsed.monthsData) {
+                                accounts.value = parsed.accounts;
+                                monthsData.value = parsed.monthsData;
+                                saveData();
+                                alert("データを復元しました。");
+                            } else {
+                                alert("不正なファイルフォーマットです。");
+                            }
+                        } catch (err) {
+                            alert("ファイルの読み込みに失敗しました。");
+                        }
+                    };
+                    reader.readAsText(file);
+                };
+
+                onMounted(() => {
+                    loadData();
+                });
+
+                return {
+                    currentMonthStr, currentMonthData, accounts,
+                    totalIncome, totalExpense, totalTransfer, currentMonthNet,
+                    changeMonth, closeMonth, cancelCloseMonth, exportData, importData
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
