@@ -1,1 +1,256 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>家計・キャッシュフロー管理</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.jsの追加 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; background-color: #f3f4f6; }
+        [v-cloak] { display: none; }
+    </style>
+</head>
+<body class="text-gray-800">
+    
+    <!-- 万が一のシステムエラー表示用（普段は隠れています） -->
+    <div id="fatal-error" style="display:none; background:#fee2e2; color:#b91c1c; padding:15px; text-align:center; font-weight:bold;">
+        致命的なエラーが発生しました。<br><span id="error-msg" style="font-size:12px; font-weight:normal;"></span>
+    </div>
+    <script>
+        window.addEventListener('error', function(e) {
+            document.getElementById('fatal-error').style.display = 'block';
+            document.getElementById('error-msg').innerText += e.message + ' | ';
+        });
+    </script>
 
+    <div id="app" v-cloak class="max-w-3xl mx-auto p-4 pb-20">
+        
+        <!-- ローディング画面 -->
+        <div v-if="isLoading" class="fixed inset-0 bg-white bg-opacity-90 flex items-center justify-center z-50">
+            <div class="text-xl font-bold text-blue-600">クラウドからデータを読み込み中...</div>
+        </div>
+
+        <header class="mb-6 flex justify-between items-end border-b pb-4 border-gray-300">
+            <div>
+                <h1 class="text-2xl font-bold text-blue-800">家計管理ダッシュボード</h1>
+                <p class="text-sm font-bold mt-1" :class="isSaving ? 'text-yellow-600' : 'text-green-600'">
+                    {{ isSaving ? '☁️ クラウドへ保存中...' : '✅ クラウド同期済' }}
+                </p>
+            </div>
+            <div class="flex gap-2 text-sm">
+                <!-- モード切り替えボタン -->
+                <button v-if="currentMode === 'monthly' && !isLoading" @click="currentMode = 'settings'" class="bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold px-3 py-1 rounded shadow-sm">⚙️ 初期値設定</button>
+                <button v-if="currentMode === 'monthly' && !isLoading" @click="currentMode = 'chart'" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 font-bold px-3 py-1 rounded shadow-sm">📊 グラフ</button>
+                <button v-if="currentMode !== 'monthly' && !isLoading" @click="currentMode = 'monthly'" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded shadow-sm">戻る</button>
+                <button v-if="currentMode === 'monthly' && !isLoading" @click="exportData" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded shadow-sm">エクスポート</button>
+            </div>
+        </header>
+
+        <!-- メインコンテンツ -->
+        <div v-if="!isLoading">
+
+            <!-- 【月次モード】 -->
+            <div v-if="currentMode === 'monthly'">
+                <!-- サマリー -->
+                <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                    <div class="bg-white p-4 rounded-lg shadow border-t-4 border-blue-500">
+                        <div class="text-xs text-gray-500 mb-1">当月収支</div>
+                        <div class="text-xl font-bold text-gray-700">¥{{ Number(currentMonthNet || 0).toLocaleString() }}</div>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow border-t-4 border-green-500">
+                        <div class="text-xs text-gray-500 mb-1">貯蓄口座</div>
+                        <div class="text-xl font-bold text-gray-700">¥{{ Number(accounts.savings || 0).toLocaleString() }}</div>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow border-t-4 border-yellow-500">
+                        <div class="text-xs text-gray-500 mb-1">年間積立</div>
+                        <div class="text-xl font-bold text-gray-700">¥{{ Number(accounts.annual || 0).toLocaleString() }}</div>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow border-t-4 border-purple-500">
+                        <div class="text-xs text-gray-500 mb-1">旅行積立</div>
+                        <div class="text-xl font-bold text-gray-700">¥{{ Number(accounts.travel || 0).toLocaleString() }}</div>
+                    </div>
+                </section>
+
+                <!-- 月選択 -->
+                <div class="flex justify-between items-center bg-white p-4 rounded-t-lg shadow-sm mb-1 border-b">
+                    <button @click="changeMonth(-1)" class="text-gray-500 hover:bg-gray-100 px-3 py-1 rounded">&lt; 前月</button>
+                    <h2 class="text-xl font-bold">{{ currentMonthStr }}</h2>
+                    <button @click="changeMonth(1)" class="text-gray-500 hover:bg-gray-100 px-3 py-1 rounded">次月 &gt;</button>
+                </div>
+
+                <!-- 入力エリア -->
+                <div class="bg-white p-3 md:p-4 rounded-b-lg shadow-sm mb-6 relative">
+                    <div v-if="currentMonthData.isClosed" class="absolute inset-0 bg-gray-50 bg-opacity-70 flex items-center justify-center z-10 rounded-b-lg">
+                        <div class="text-center">
+                            <span class="bg-green-100 text-green-800 font-bold px-4 py-2 rounded-full border border-green-300 shadow">この月は確定済みです</span>
+                        </div>
+                    </div>
+
+                    <!-- 収入 -->
+                    <div class="flex justify-between items-center mb-3 border-b-2 border-blue-100 pb-1">
+                        <h3 class="font-bold text-blue-600">収入項目 <span class="text-sm">(計: ¥{{ Number(totalIncome || 0).toLocaleString() }})</span></h3>
+                        <button v-if="!currentMonthData.isClosed" @click="addItem(currentMonthData.incomes, 'normal')" class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1 rounded">＋ 追加</button>
+                    </div>
+                    <div class="space-y-2 mb-6">
+                        <div v-for="(item, index) in currentMonthData.incomes" :key="'m-in'+index" class="flex items-center gap-1.5">
+                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
+                            <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
+                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
+                            <button v-if="!currentMonthData.isClosed" @click="removeItem(currentMonthData.incomes, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
+                        </div>
+                    </div>
+
+                    <!-- 支出 -->
+                    <div class="flex justify-between items-center mb-3 border-b-2 border-red-100 pb-1">
+                        <h3 class="font-bold text-red-600">支出項目 <span class="text-sm">(計: ¥{{ Number(totalExpense || 0).toLocaleString() }})</span></h3>
+                        <button v-if="!currentMonthData.isClosed" @click="addItem(currentMonthData.expenses, 'normal')" class="text-xs bg-red-50 text-red-600 border border-red-200 px-2 py-1 rounded">＋ 追加</button>
+                    </div>
+                    <div class="space-y-2 mb-6">
+                        <div v-for="(item, index) in currentMonthData.expenses" :key="'m-out'+index" class="flex items-center gap-1.5">
+                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
+                            <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
+                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
+                            <button v-if="!currentMonthData.isClosed" @click="removeItem(currentMonthData.expenses, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
+                        </div>
+                    </div>
+
+                    <!-- 繰入 -->
+                    <div class="flex justify-between items-center mb-3 border-b-2 border-yellow-100 pb-1">
+                        <h3 class="font-bold text-yellow-600">繰入（積立などへ） <span class="text-sm">(計: ¥{{ Number(totalTransferIn || 0).toLocaleString() }})</span></h3>
+                        <button v-if="!currentMonthData.isClosed" @click="addItem(currentMonthData.transfersIn, 'transfer')" class="text-xs bg-yellow-50 text-yellow-700 border border-yellow-200 px-2 py-1 rounded">＋ 追加</button>
+                    </div>
+                    <div class="space-y-2 mb-6">
+                        <div v-for="(item, index) in currentMonthData.transfersIn" :key="'m-trin'+index" class="flex items-center gap-1">
+                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-1 py-1 text-xs bg-gray-50" :disabled="currentMonthData.isClosed">
+                            <select v-model="item.target" class="w-20 shrink-0 border-gray-300 border rounded px-0 py-1 text-xs bg-gray-50 text-gray-700" :disabled="currentMonthData.isClosed">
+                                <option value="annual">年間積立</option>
+                                <option value="travel">旅行積立</option>
+                                <option value="savings">貯蓄口座</option>
+                            </select>
+                            <input v-model.number="item.amount" type="number" class="w-20 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
+                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
+                            <button v-if="!currentMonthData.isClosed" @click="removeItem(currentMonthData.transfersIn, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
+                        </div>
+                    </div>
+
+                    <!-- 引出し -->
+                    <div class="flex justify-between items-center mb-3 border-b-2 border-purple-100 pb-1">
+                        <h3 class="font-bold text-purple-600">引出し（積立などから） <span class="text-sm">(計: ¥{{ Number(totalTransferOut || 0).toLocaleString() }})</span></h3>
+                        <button v-if="!currentMonthData.isClosed" @click="addItem(currentMonthData.transfersOut, 'transfer')" class="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-2 py-1 rounded">＋ 追加</button>
+                    </div>
+                    <div class="space-y-2 mb-6">
+                        <div v-for="(item, index) in currentMonthData.transfersOut" :key="'m-trout'+index" class="flex items-center gap-1">
+                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-1 py-1 text-xs bg-gray-50" :disabled="currentMonthData.isClosed">
+                            <select v-model="item.target" class="w-20 shrink-0 border-gray-300 border rounded px-0 py-1 text-xs bg-gray-50 text-gray-700" :disabled="currentMonthData.isClosed">
+                                <option value="annual">年間積立</option>
+                                <option value="travel">旅行積立</option>
+                                <option value="savings">貯蓄口座</option>
+                            </select>
+                            <input v-model.number="item.amount" type="number" class="w-20 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
+                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
+                            <button v-if="!currentMonthData.isClosed" @click="removeItem(currentMonthData.transfersOut, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
+                        </div>
+                    </div>
+
+                    <div class="bg-gray-100 p-4 rounded flex justify-between items-center mb-6 border border-gray-200">
+                        <span class="font-bold text-sm md:text-base">当月残高 (貯蓄への入金予定)</span>
+                        <span class="text-lg md:text-xl font-bold" :class="currentMonthNet >= 0 ? 'text-blue-600' : 'text-red-600'">¥{{ Number(currentMonthNet || 0).toLocaleString() }}</span>
+                    </div>
+                </div>
+
+                <!-- 確定ボタン -->
+                <div class="flex gap-4">
+                    <button v-if="!currentMonthData.isClosed" @click="closeMonth" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded shadow-lg transition-colors">
+                        この月の収支を確定する
+                    </button>
+                    <button v-if="currentMonthData.isClosed" @click="cancelCloseMonth" class="flex-1 bg-red-100 hover:bg-red-200 text-red-700 border border-red-300 font-bold py-3 px-4 rounded transition-colors">
+                        確定をキャンセル
+                    </button>
+                </div>
+            </div>
+
+            <!-- 【設定モード】 -->
+            <div v-if="currentMode === 'settings'">
+                <div class="bg-blue-50 p-4 rounded-t-lg shadow-sm mb-1 border-b text-center">
+                    <h2 class="text-lg font-bold text-blue-800">⚙️ 「初期値（予算）」マスタ設定</h2>
+                    <p class="text-xs text-blue-600 mt-1">追加・変更した内容は、新しい月を開いた際に自動適用されます。</p>
+                </div>
+
+                <div class="bg-white p-3 md:p-4 rounded-b-lg shadow-sm mb-6">
+                    <div class="flex justify-between items-center mb-3 border-b-2 border-blue-100 pb-1">
+                        <h3 class="font-bold text-blue-600">収入項目</h3>
+                        <button @click="addItem(baseSettings.incomes, 'normal')" class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1 rounded">＋ 追加</button>
+                    </div>
+                    <div class="space-y-2 mb-6">
+                        <div v-for="(item, index) in baseSettings.incomes" :key="'s-in'+index" class="flex items-center gap-1.5">
+                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50">
+                            <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono">
+                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
+                            <button @click="removeItem(baseSettings.incomes, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-between items-center mb-3 border-b-2 border-red-100 pb-1">
+                        <h3 class="font-bold text-red-600">支出項目</h3>
+                        <button @click="addItem(baseSettings.expenses, 'normal')" class="text-xs bg-red-50 text-red-600 border border-red-200 px-2 py-1 rounded">＋ 追加</button>
+                    </div>
+                    <div class="space-y-2 mb-6">
+                        <div v-for="(item, index) in baseSettings.expenses" :key="'s-out'+index" class="flex items-center gap-1.5">
+                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50">
+                            <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono">
+                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
+                            <button @click="removeItem(baseSettings.expenses, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-between items-center mb-3 border-b-2 border-yellow-100 pb-1">
+                        <h3 class="font-bold text-yellow-600">繰入（積立などへ）</h3>
+                        <button @click="addItem(baseSettings.transfersIn, 'transfer')" class="text-xs bg-yellow-50 text-yellow-700 border border-yellow-200 px-2 py-1 rounded">＋ 追加</button>
+                    </div>
+                    <div class="space-y-2 mb-6">
+                        <div v-for="(item, index) in baseSettings.transfersIn" :key="'s-trin'+index" class="flex items-center gap-1">
+                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-1 py-1 text-xs bg-gray-50">
+                            <select v-model="item.target" class="w-20 shrink-0 border-gray-300 border rounded px-0 py-1 text-xs bg-gray-50 text-gray-700">
+                                <option value="annual">年間積立</option>
+                                <option value="travel">旅行積立</option>
+                                <option value="savings">貯蓄口座</option>
+                            </select>
+                            <input v-model.number="item.amount" type="number" class="w-20 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono">
+                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
+                            <button @click="removeItem(baseSettings.transfersIn, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-between items-center mb-3 border-b-2 border-purple-100 pb-1">
+                        <h3 class="font-bold text-purple-600">引出し（積立などから）</h3>
+                        <button @click="addItem(baseSettings.transfersOut, 'transfer')" class="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-2 py-1 rounded">＋ 追加</button>
+                    </div>
+                    <div class="space-y-2 mb-6">
+                        <div v-for="(item, index) in baseSettings.transfersOut" :key="'s-trout'+index" class="flex items-center gap-1">
+                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-1 py-1 text-xs bg-gray-50">
+                            <select v-model="item.target" class="w-20 shrink-0 border-gray-300 border rounded px-0 py-1 text-xs bg-gray-50 text-gray-700">
+                                <option value="annual">年間積立</option>
+                                <option value="travel">旅行積立</option>
+                                <option value="savings">貯蓄口座</option>
+                            </select>
+                            <input v-model.number="item.amount" type="number" class="w-20 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono">
+                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
+                            <button @click="removeItem(baseSettings.transfersOut, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex flex-col gap-3">
+                    <button @click="applySettingsAndClose" class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 px-4 rounded shadow-lg transition-colors">
+                        マスタを保存し、開いたことのある「未確定月」にも上書きして戻る
+                    </button>
+                    <button @click="justSaveAndClose" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded shadow-lg transition-colors">
+                        マスタのみ保存して戻る（今後の新しい月にのみ適用）
+                    </button>
+                </div>
+            </div>
+
+            <!-- 【グラフモード】 -->
