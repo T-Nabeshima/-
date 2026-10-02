@@ -13,7 +13,7 @@
 </head>
 <body class="text-gray-800">
     <div id="app" v-cloak class="max-w-3xl mx-auto p-4 pb-20">
-
+        
         <div v-if="isLoading" class="fixed inset-0 bg-white bg-opacity-90 flex items-center justify-center z-50">
             <div class="text-xl font-bold text-blue-600">クラウドからデータを読み込み中...</div>
         </div>
@@ -89,20 +89,6 @@
                     <input v-model.number="item.amount" type="number" class="w-[42%] border-gray-300 border rounded px-2 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
                     <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
                     <button v-if="!currentMonthData.isClosed" @click="removeItem('expenses', index)" class="w-[6%] text-gray-400 hover:text-red-500 font-bold text-center">×</button>
-                </div>
-            </div>
-
-            <!-- 特別支出 -->
-            <div class="flex justify-between items-center mb-3 border-b-2 border-orange-100 pb-1">
-                <h3 class="font-bold text-orange-600">特別支出 (計: ¥{{ totalSpecialExpense.toLocaleString() }})</h3>
-                <button v-if="!currentMonthData.isClosed" @click="addItem('specialExpenses')" class="text-xs bg-orange-50 text-orange-600 border border-orange-200 px-2 py-1 rounded">＋ 追加</button>
-            </div>
-            <div class="space-y-2 mb-6">
-                <div v-for="(item, index) in currentMonthData.specialExpenses" :key="'sp'+index" class="flex items-center gap-1.5">
-                    <input v-model="item.name" class="w-[42%] border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
-                    <input v-model.number="item.amount" type="number" class="w-[42%] border-gray-300 border rounded px-2 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
-                    <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
-                    <button v-if="!currentMonthData.isClosed" @click="removeItem('specialExpenses', index)" class="w-[6%] text-gray-400 hover:text-red-500 font-bold text-center">×</button>
                 </div>
             </div>
 
@@ -187,7 +173,6 @@
                 {name: '家具積立', amount: 20000},
                 {name: '教育積立', amount: 10000}
             ],
-            specialExpenses: [], // ★ 初期マスタは不要のため空配列
             transfersIn: [
                 {name: '年間積立へ繰入', amount: 65000, target: 'annual'},
                 {name: '旅行積立へ繰入', amount: 20000, target: 'travel'}
@@ -222,10 +207,6 @@
                     if (!monthsData.value[key]) {
                         monthsData.value[key] = JSON.parse(JSON.stringify(defaultData));
                     }
-                    // 過去データに特別支出が存在しない場合の安全措置
-                    if (!monthsData.value[key].specialExpenses) {
-                        monthsData.value[key].specialExpenses = [];
-                    }
                     return monthsData.value[key];
                 });
 
@@ -241,7 +222,6 @@
                                 const m = data.monthsData[k];
                                 if (!m.incomes) m.incomes = JSON.parse(JSON.stringify(defaultData.incomes));
                                 if (!m.expenses) m.expenses = JSON.parse(JSON.stringify(defaultData.expenses));
-                                if (!m.specialExpenses) m.specialExpenses = []; // ★ 過去データ対策
                                 if (!m.transfersIn) m.transfersIn = m.transfers ? m.transfers : JSON.parse(JSON.stringify(defaultData.transfersIn));
                                 if (!m.transfersOut) m.transfersOut = JSON.parse(JSON.stringify(defaultData.transfersOut));
                             });
@@ -278,11 +258,9 @@
 
                 const totalIncome = computed(() => (currentMonthData.value.incomes || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
                 const totalExpense = computed(() => (currentMonthData.value.expenses || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
-                const totalSpecialExpense = computed(() => (currentMonthData.value.specialExpenses || []).reduce((s, i) => s + (Number(i.amount) || 0), 0)); // ★ 特別支出の合計
                 const totalTransferIn = computed(() => (currentMonthData.value.transfersIn || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
                 const totalTransferOut = computed(() => (currentMonthData.value.transfersOut || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
-
-                // ★ 特別支出は月の収支計算から除外したまま
+                
                 const currentMonthNet = computed(() => totalIncome.value - totalExpense.value - totalTransferIn.value + totalTransferOut.value);
 
                 const changeMonth = (d) => {
@@ -306,17 +284,14 @@
 
                 const closeMonth = () => {
                     if (currentMonthData.value.isClosed) return;
-                    if (confirm(`${currentMonthStr.value}の収支を確定しますか？\n残高¥${currentMonthNet.value.toLocaleString()}を貯蓄口座に移動し、\n特別支出¥${totalSpecialExpense.value.toLocaleString()}を貯蓄口座から差し引きます。`)) {
+                    if (confirm(`${currentMonthStr.value}の収支を確定しますか？\n残高の¥${currentMonthNet.value.toLocaleString()}は貯蓄口座に移動します。`)) {
                         (currentMonthData.value.transfersIn || []).forEach(t => {
                             if (accounts.value[t.target] !== undefined) accounts.value[t.target] += (Number(t.amount) || 0);
                         });
                         (currentMonthData.value.transfersOut || []).forEach(t => {
                             if (accounts.value[t.target] !== undefined) accounts.value[t.target] -= (Number(t.amount) || 0);
                         });
-                        
-                        // ★ 貯蓄口座に当月残高を足し、特別支出を差し引く
-                        accounts.value.savings += (currentMonthNet.value - totalSpecialExpense.value);
-                        
+                        accounts.value.savings += currentMonthNet.value;
                         currentMonthData.value.isClosed = true;
                         saveData();
                     }
@@ -326,4 +301,36 @@
                     if (!currentMonthData.value.isClosed) return;
                     if (confirm('確定をキャンセルして再編集可能にしますか？')) {
                         (currentMonthData.value.transfersIn || []).forEach(t => {
-              
+                            if (accounts.value[t.target] !== undefined) accounts.value[t.target] -= (Number(t.amount) || 0);
+                        });
+                        (currentMonthData.value.transfersOut || []).forEach(t => {
+                            if (accounts.value[t.target] !== undefined) accounts.value[t.target] += (Number(t.amount) || 0);
+                        });
+                        accounts.value.savings -= currentMonthNet.value;
+                        currentMonthData.value.isClosed = false;
+                        saveData();
+                    }
+                };
+
+                const exportData = () => {
+                    const blob = new Blob([JSON.stringify({ accounts: accounts.value, monthsData: monthsData.value }, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `budget_backup_${currentMonthKey.value}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                };
+
+                onMounted(loadData);
+
+                return {
+                    currentMonthStr, currentMonthData, accounts, isLoading, isSaving,
+                    totalIncome, totalExpense, totalTransferIn, totalTransferOut, currentMonthNet,
+                    changeMonth, closeMonth, cancelCloseMonth, exportData, addItem, removeItem
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
