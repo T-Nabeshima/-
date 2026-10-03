@@ -6,13 +6,15 @@
     <title>家計・キャッシュフロー管理</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.jsの追加 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; background-color: #f3f4f6; }
         [v-cloak] { display: none; }
     </style>
 </head>
-<body class="text-gray-800">
-
+<body class="text-gray-800" @click="handleBodyClick">
+    
     <!-- 万が一のシステムエラー表示用（普段は隠れています） -->
     <div id="fatal-error" style="display:none; background:#fee2e2; color:#b91c1c; padding:15px; text-align:center; font-weight:bold;">
         致命的なエラーが発生しました。<br><span id="error-msg" style="font-size:12px; font-weight:normal;"></span>
@@ -25,7 +27,7 @@
     </script>
 
     <div id="app" v-cloak class="max-w-3xl mx-auto p-4 pb-20">
-
+        
         <!-- ローディング画面 -->
         <div v-if="isLoading" class="fixed inset-0 bg-white bg-opacity-90 flex items-center justify-center z-50">
             <div class="text-xl font-bold text-blue-600">クラウドからデータを読み込み中...</div>
@@ -39,8 +41,11 @@
                 </p>
             </div>
             <div class="flex gap-2 text-sm">
-                <button v-if="currentMode === 'monthly' && !isLoading" @click="currentMode = 'settings'" class="bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold px-3 py-1 rounded shadow-sm">⚙️ 初期値設定</button>
-                <button v-if="currentMode === 'monthly' && !isLoading" @click="exportData" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded shadow-sm">エクスポート</button>
+                <!-- モード切り替えボタン -->
+                <button v-if="currentMode === 'monthly' && !isLoading" @click.stop="currentMode = 'settings'" class="bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold px-3 py-1 rounded shadow-sm">⚙️ 初期値設定</button>
+                <button v-if="currentMode === 'monthly' && !isLoading" @click.stop="currentMode = 'chart'" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 font-bold px-3 py-1 rounded shadow-sm">📊 グラフ</button>
+                <button v-if="currentMode !== 'monthly' && !isLoading" @click.stop="currentMode = 'monthly'; activePopup = null;" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded shadow-sm">戻る</button>
+                <button v-if="currentMode === 'monthly' && !isLoading" @click.stop="exportData" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded shadow-sm">エクスポート</button>
             </div>
         </header>
 
@@ -248,32 +253,63 @@
                 </div>
             </div>
 
+            <!-- 【グラフモード】 -->
+            <div v-if="currentMode === 'chart'" @click.stop>
+                <div class="bg-indigo-50 p-4 rounded-t-lg shadow-sm mb-1 border-b text-center">
+                    <h2 class="text-lg font-bold text-indigo-800">📊 グラフ推移</h2>
+                    <p class="text-xs text-indigo-600 mt-1">各月の点や棒をタップすると詳細が表示されます。</p>
+                </div>
+
+                <div class="bg-white p-4 rounded-b-lg shadow-sm mb-6 relative">
+                    <!-- タップ時ポップアップ詳細カード -->
+                    <div v-if="activePopup" class="mb-4 bg-blue-50 border border-blue-200 p-4 rounded-lg shadow relative">
+                        <button @click="activePopup = null" class="absolute top-2 right-3 text-gray-400 hover:text-gray-600 font-bold text-lg">×</button>
+                        <h4 class="font-bold text-blue-900 text-base mb-2 border-b pb-1">📅 {{ activePopup.label }} の詳細</h4>
+                        <div class="grid grid-cols-2 gap-2 text-sm text-gray-700">
+                            <div>当月収支: <span class="font-bold" :class="activePopup.net >= 0 ? 'text-blue-600' : 'text-red-600'">¥{{ Number(activePopup.net).toLocaleString() }}</span></div>
+                            <div>ステータス: <span class="font-bold" :class="activePopup.isClosed ? 'text-green-600' : 'text-orange-500'">{{ activePopup.isClosed ? '✅ 確定済み' : '⏳ 予測' }}</span></div>
+                            <div>貯蓄口座: <span class="font-bold">¥{{ Number(activePopup.savings).toLocaleString() }}</span></div>
+                            <div>年間積立: <span class="font-bold">¥{{ Number(activePopup.annual).toLocaleString() }}</span></div>
+                            <div>旅行積立: <span class="font-bold">¥{{ Number(activePopup.travel).toLocaleString() }}</span></div>
+                        </div>
+                    </div>
+
+                    <div class="mb-8">
+                        <h3 class="font-bold text-center mb-4 text-gray-700">月別収支推移 (当月収支)</h3>
+                        <canvas id="balanceChart"></canvas>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-center mb-4 text-gray-700">各口座月別残高比較 (横並び棒グラフ)</h3>
+                        <canvas id="accountChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </div>
 
     <script>
         const API_URL = 'https://script.google.com/macros/s/AKfycbyoLp0RJlzwZUGya4yY_Q32HtgXxt-m01Hf8tsfpwEUEuChrk9hmcycGBTZ4w2UFyVg/exec';
-        const { createApp, ref, computed, watch, onMounted } = Vue;
+        const { createApp, ref, computed, watch, onMounted, nextTick } = Vue;
 
         const defaultData = {
             incomes: [
                 {name: '前月繰越', amount: 0}, {name: '給与', amount: 455000}, {name: 'えりな給与', amount: 30000}, {name: '子育て支援金', amount: 25000}
             ],
             expenses: [
-                {name: '管理費', amount: 33000}, {name: '住宅ローン', amount: 45681}, {name: '軽ローン', amount: 18634},
-                {name: '保育料', amount: 6000}, {name: '楽天カード', amount: 35000}, {name: 'リクルートカード', amount: 160000},
-                {name: 'ペイペイ', amount: 10000}, {name: '現金', amount: 20000}, {name: 'スーペイ', amount: 35000},
-                {name: '家具積立', amount: 20000}, {name: '教育積立', amount: 10000}
+                {name: '管理費', amount: 33000}, {name: '住宅ローン', amount: 45681}, {name: 'コープ共済', amount: 2000}, {name: '軽ローン', amount: 18634},
+                {name: 'フリードローン', amount: 35671}, {name: '保育料', amount: 6000}, {name: '楽天カード', amount: 35000},
+                {name: 'リクルートカード', amount: 160000}, {name: 'ペイペイ', amount: 10000}, {name: '現金', amount: 20000},
+                {name: 'スーペイ', amount: 35000}, {name: '家具積立', amount: 20000}, {name: '教育積立', amount: 10000}
             ],
             transfersIn: [
-                {name: '年間積立へ繰入', amount: 65000, target: 'annual'}, {name: '旅行積立へ繰入', amount: 20000, target: 'travel'}
+                {name: '年間積立へ繰入', amount: 65000, target: 'annual'}, {name: '旅行積立へ繰入', amount: 0, target: 'travel'}
             ],
             transfersOut: [
                 {name: '年間積立から引出', amount: 0, target: 'annual'}, {name: '旅行積立から引出', amount: 0, target: 'travel'}
             ]
         };
 
-        // データが欠損（空っぽ）している場合に安全にデフォルト値を補完する魔法の関数
         const safeClone = (dataArray, defaultArray) => {
             try {
                 if (!dataArray || !Array.isArray(dataArray) || dataArray.length === 0) {
@@ -294,7 +330,10 @@
                 const currentMode = ref('monthly');
                 const isLoading = ref(true);
                 const isSaving = ref(false);
+                const activePopup = ref(null);
                 let saveTimeout = null;
+                let balanceChartInstance = null;
+                let accountChartInstance = null;
 
                 const currentMonthKey = computed(() => {
                     const y = currentDate.value.getFullYear();
@@ -327,7 +366,7 @@
                     try {
                         const response = await fetch(API_URL);
                         const data = await response.json();
-
+                        
                         if (data && data.accounts) {
                             accounts.value = {
                                 savings: Number(data.accounts.savings) || 0,
@@ -335,7 +374,7 @@
                                 travel: Number(data.accounts.travel) || 0
                             };
                         }
-
+                        
                         if (data && data.baseSettings) {
                             baseSettings.value = {
                                 incomes: safeClone(data.baseSettings.incomes, defaultData.incomes),
@@ -344,13 +383,12 @@
                                 transfersOut: safeClone(data.baseSettings.transfersOut, defaultData.transfersOut)
                             };
                         }
-
+                        
                         if (data && data.monthsData) {
                             Object.keys(data.monthsData).forEach(k => {
                                 const m = data.monthsData[k];
                                 m.incomes = safeClone(m.incomes, baseSettings.value.incomes);
                                 m.expenses = safeClone(m.expenses, baseSettings.value.expenses);
-                                // transfers（旧名）があれば救済する
                                 const loadedTransfersIn = m.transfersIn || m.transfers;
                                 m.transfersIn = safeClone(loadedTransfersIn, baseSettings.value.transfersIn);
                                 m.transfersOut = safeClone(m.transfersOut, baseSettings.value.transfersOut);
@@ -394,6 +432,20 @@
                 watch(currentMonthKey, (newKey) => {
                     if (!isLoading.value) ensureMonthData(newKey);
                 });
+                
+                watch(currentMode, async (newMode) => {
+                    activePopup.value = null;
+                    if (newMode === 'chart') {
+                        await nextTick();
+                        drawCharts();
+                    }
+                });
+
+                const handleBodyClick = () => {
+                    if (activePopup.value) {
+                        activePopup.value = null;
+                    }
+                };
 
                 const safeSum = (arr) => (Array.isArray(arr) ? arr : []).reduce((s, i) => s + (Number(i.amount) || 0), 0);
 
@@ -401,7 +453,7 @@
                 const totalExpense = computed(() => safeSum(currentMonthData.value.expenses));
                 const totalTransferIn = computed(() => safeSum(currentMonthData.value.transfersIn));
                 const totalTransferOut = computed(() => safeSum(currentMonthData.value.transfersOut));
-
+                
                 const currentMonthNet = computed(() => totalIncome.value - totalExpense.value - totalTransferIn.value + totalTransferOut.value);
 
                 const changeMonth = (d) => {
@@ -436,7 +488,7 @@
                         currentMode.value = 'monthly';
                     }
                 };
-
+                
                 const justSaveAndClose = () => {
                     currentMode.value = 'monthly';
                 };
@@ -481,11 +533,154 @@
                     URL.revokeObjectURL(url);
                 };
 
+                const drawCharts = () => {
+                    const sortedKeys = Object.keys(monthsData.value).sort();
+                    if (sortedKeys.length === 0) return;
+
+                    const labels = [];
+                    const netData = [];
+                    const savingsData = [];
+                    const annualData = [];
+                    const travelData = [];
+                    const savingsBg = [];
+                    const annualBg = [];
+                    const travelBg = [];
+                    const popupDetails = {};
+
+                    // 現在の口座残高をベースに、過去から現在への口座残高を正確に逆算して復元
+                    let runningSavings = Number(accounts.value.savings) || 0;
+                    let runningAnnual = Number(accounts.value.annual) || 0;
+                    let runningTravel = Number(accounts.value.travel) || 0;
+
+                    // まず全月の収支を集計して逆算の起点を求める
+                    const monthCalculations = {};
+                    sortedKeys.forEach(key => {
+                        const m = monthsData.value[key];
+                        let net = 0;
+                        let trinAnnual = 0, troutAnnual = 0;
+                        let trinTravel = 0, troutTravel = 0;
+
+                        if (m.incomes && m.expenses && m.transfersIn && m.transfersOut) {
+                            net = safeSum(m.incomes) - safeSum(m.expenses) - safeSum(m.transfersIn) + safeSum(m.transfersOut);
+                            (m.transfersIn || []).forEach(t => {
+                                if (t.target === 'annual') trinAnnual += Number(t.amount) || 0;
+                                if (t.target === 'travel') trinTravel += Number(t.amount) || 0;
+                            });
+                            (m.transfersOut || []).forEach(t => {
+                                if (t.target === 'annual') troutAnnual += Number(t.amount) || 0;
+                                if (t.target === 'travel') troutTravel += Number(t.amount) || 0;
+                            });
+                        }
+                        monthCalculations[key] = { net, trinAnnual, troutAnnual, trinTravel, troutTravel };
+
+                        if (m.isClosed) {
+                            runningSavings -= net;
+                            runningAnnual -= (trinAnnual - troutAnnual);
+                            runningTravel -= (trinTravel - troutTravel);
+                        }
+                    });
+
+                    // 順方向へシミュレーション・復元
+                    let simSavings = runningSavings;
+                    let simAnnual = runningAnnual;
+                    let simTravel = runningTravel;
+
+                    sortedKeys.forEach(key => {
+                        const m = monthsData.value[key];
+                        labels.push(key);
+                        const calc = monthCalculations[key];
+                        netData.push(calc.net);
+
+                        simSavings += calc.net;
+                        simAnnual += (calc.trinAnnual - calc.troutAnnual);
+                        simTravel += (calc.trinTravel - calc.troutTravel);
+
+                        savingsData.push(simSavings);
+                        annualData.push(simAnnual);
+                        travelData.push(simTravel);
+
+                        if (m.isClosed) {
+                            savingsBg.push('rgba(75, 192, 192, 0.8)');
+                            annualBg.push('rgba(255, 206, 86, 0.8)');
+                            travelBg.push('rgba(153, 102, 255, 0.8)');
+                        } else {
+                            savingsBg.push('rgba(75, 192, 192, 0.3)');
+                            annualBg.push('rgba(255, 206, 86, 0.3)');
+                            travelBg.push('rgba(153, 102, 255, 0.3)');
+                        }
+
+                        popupDetails[key] = {
+                            label: key,
+                            net: calc.net,
+                            savings: simSavings,
+                            annual: simAnnual,
+                            travel: simTravel,
+                            isClosed: m.isClosed
+                        };
+                    });
+
+                    const handleChartClick = (event, elements) => {
+                        if (elements && elements.length > 0) {
+                            const index = elements[0].index;
+                            const clickedKey = labels[index];
+                            if (popupDetails[clickedKey]) {
+                                activePopup.value = popupDetails[clickedKey];
+                            }
+                        }
+                    };
+
+                    const ctxBalance = document.getElementById('balanceChart');
+                    if (ctxBalance) {
+                        if (balanceChartInstance) balanceChartInstance.destroy();
+                        balanceChartInstance = new Chart(ctxBalance, {
+                            type: 'line',
+                            data: {
+                                labels: labels,
+                                datasets: [{
+                                    label: '月別収支 (¥)',
+                                    data: netData,
+                                    borderColor: 'rgba(54, 162, 235, 1)',
+                                    backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                                    pointRadius: 6,
+                                    fill: true,
+                                    tension: 0.1
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                scales: { y: { beginAtZero: true } },
+                                onClick: handleChartClick
+                            }
+                        });
+                    }
+
+                    const ctxAccount = document.getElementById('accountChart');
+                    if (ctxAccount) {
+                        if (accountChartInstance) accountChartInstance.destroy();
+                        accountChartInstance = new Chart(ctxAccount, {
+                            type: 'bar',
+                            data: {
+                                labels: labels,
+                                datasets: [
+                                    { label: '貯蓄口座', data: savingsData, backgroundColor: savingsBg, borderWidth: 1 },
+                                    { label: '年間積立', data: annualData, backgroundColor: annualBg, borderWidth: 1 },
+                                    { label: '旅行積立', data: travelData, backgroundColor: travelBg, borderWidth: 1 }
+                                ]
+                            },
+                            options: {
+                                responsive: true,
+                                scales: { y: { beginAtZero: true } },
+                                onClick: handleChartClick
+                            }
+                        });
+                    }
+                };
+
                 onMounted(loadData);
 
                 return {
                     currentMonthStr, currentMonthData, baseSettings, accounts, currentMode,
-                    isLoading, isSaving,
+                    isLoading, isSaving, activePopup, handleBodyClick,
                     totalIncome, totalExpense, totalTransferIn, totalTransferOut, currentMonthNet,
                     changeMonth, closeMonth, cancelCloseMonth, exportData, addItem, removeItem, applySettingsAndClose, justSaveAndClose
                 };
