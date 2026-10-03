@@ -14,7 +14,7 @@
     </style>
 </head>
 <body class="text-gray-800" @click="handleBodyClick">
-    
+
     <!-- 万が一のシステムエラー表示用（普段は隠れています） -->
     <div id="fatal-error" style="display:none; background:#fee2e2; color:#b91c1c; padding:15px; text-align:center; font-weight:bold;">
         致命的なエラーが発生しました。<br><span id="error-msg" style="font-size:12px; font-weight:normal;"></span>
@@ -27,7 +27,7 @@
     </script>
 
     <div id="app" v-cloak class="max-w-3xl mx-auto p-4 pb-20">
-        
+
         <!-- ローディング画面 -->
         <div v-if="isLoading" class="fixed inset-0 bg-white bg-opacity-90 flex items-center justify-center z-50">
             <div class="text-xl font-bold text-blue-600">クラウドからデータを読み込み中...</div>
@@ -114,6 +114,34 @@
                             <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
                             <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
                             <button v-if="!currentMonthData.isClosed" @click="removeItem(currentMonthData.expenses, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
+                        </div>
+                    </div>
+
+                    <!-- 特別収入 (追加) -->
+                    <div class="flex justify-between items-center mb-3 border-b-2 border-teal-100 pb-1">
+                        <h3 class="font-bold text-teal-600">特別収入 <span class="text-xs text-gray-500 font-normal">※収支外・貯蓄へ加算</span> <span class="text-sm">(計: ¥{{ Number(totalSpecialIncome || 0).toLocaleString() }})</span></h3>
+                        <button v-if="!currentMonthData.isClosed" @click="addItem(currentMonthData.specialIncomes, 'normal')" class="text-xs bg-teal-50 text-teal-600 border border-teal-200 px-2 py-1 rounded">＋ 追加</button>
+                    </div>
+                    <div class="space-y-2 mb-6">
+                        <div v-for="(item, index) in currentMonthData.specialIncomes" :key="'m-spin'+index" class="flex items-center gap-1.5">
+                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
+                            <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
+                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
+                            <button v-if="!currentMonthData.isClosed" @click="removeItem(currentMonthData.specialIncomes, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
+                        </div>
+                    </div>
+
+                    <!-- 特別支出 -->
+                    <div class="flex justify-between items-center mb-3 border-b-2 border-orange-100 pb-1">
+                        <h3 class="font-bold text-orange-600">特別支出 <span class="text-xs text-gray-500 font-normal">※収支外・貯蓄から引落</span> <span class="text-sm">(計: ¥{{ Number(totalSpecialExpense || 0).toLocaleString() }})</span></h3>
+                        <button v-if="!currentMonthData.isClosed" @click="addItem(currentMonthData.specialExpenses, 'normal')" class="text-xs bg-orange-50 text-orange-600 border border-orange-200 px-2 py-1 rounded">＋ 追加</button>
+                    </div>
+                    <div class="space-y-2 mb-6">
+                        <div v-for="(item, index) in currentMonthData.specialExpenses" :key="'m-spout'+index" class="flex items-center gap-1.5">
+                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
+                            <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
+                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
+                            <button v-if="!currentMonthData.isClosed" @click="removeItem(currentMonthData.specialExpenses, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
                         </div>
                     </div>
 
@@ -206,6 +234,34 @@
                         </div>
                     </div>
 
+                    <!-- 特別収入マスタ -->
+                    <div class="flex justify-between items-center mb-3 border-b-2 border-teal-100 pb-1">
+                        <h3 class="font-bold text-teal-600">特別収入 (初期マスタ)</h3>
+                        <button @click="addItem(baseSettings.specialIncomes, 'normal')" class="text-xs bg-teal-50 text-teal-600 border border-teal-200 px-2 py-1 rounded">＋ 追加</button>
+                    </div>
+                    <div class="space-y-2 mb-6">
+                        <div v-for="(item, index) in baseSettings.specialIncomes" :key="'s-spin'+index" class="flex items-center gap-1.5">
+                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50">
+                            <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono">
+                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
+                            <button @click="removeItem(baseSettings.specialIncomes, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
+                        </div>
+                    </div>
+
+                    <!-- 特別支出マスタ -->
+                    <div class="flex justify-between items-center mb-3 border-b-2 border-orange-100 pb-1">
+                        <h3 class="font-bold text-orange-600">特別支出 (初期マスタ)</h3>
+                        <button @click="addItem(baseSettings.specialExpenses, 'normal')" class="text-xs bg-orange-50 text-orange-600 border border-orange-200 px-2 py-1 rounded">＋ 追加</button>
+                    </div>
+                    <div class="space-y-2 mb-6">
+                        <div v-for="(item, index) in baseSettings.specialExpenses" :key="'s-spout'+index" class="flex items-center gap-1.5">
+                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50">
+                            <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono">
+                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
+                            <button @click="removeItem(baseSettings.specialExpenses, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
+                        </div>
+                    </div>
+
                     <div class="flex justify-between items-center mb-3 border-b-2 border-yellow-100 pb-1">
                         <h3 class="font-bold text-yellow-600">繰入（積立などへ）</h3>
                         <button @click="addItem(baseSettings.transfersIn, 'transfer')" class="text-xs bg-yellow-50 text-yellow-700 border border-yellow-200 px-2 py-1 rounded">＋ 追加</button>
@@ -267,6 +323,9 @@
                         <h4 class="font-bold text-blue-900 text-base mb-2 border-b pb-1">📅 {{ activePopup.label }} の詳細</h4>
                         <div class="grid grid-cols-2 gap-2 text-sm text-gray-700">
                             <div>当月収支: <span class="font-bold" :class="activePopup.net >= 0 ? 'text-blue-600' : 'text-red-600'">¥{{ Number(activePopup.net).toLocaleString() }}</span></div>
+                            <div v-if="activePopup.specialIn > 0">特別収入: <span class="font-bold text-teal-600">¥{{ Number(activePopup.specialIn).toLocaleString() }}</span></div>
+                            <div v-if="activePopup.specialOut > 0">特別支出: <span class="font-bold text-orange-600">¥{{ Number(activePopup.specialOut).toLocaleString() }}</span></div>
+                            <div class="col-span-2 border-t border-blue-200 my-1"></div>
                             <div>ステータス: <span class="font-bold" :class="activePopup.isClosed ? 'text-green-600' : 'text-orange-500'">{{ activePopup.isClosed ? '✅ 確定済み' : '⏳ 予測' }}</span></div>
                             <div>貯蓄口座: <span class="font-bold">¥{{ Number(activePopup.savings).toLocaleString() }}</span></div>
                             <div>年間積立: <span class="font-bold">¥{{ Number(activePopup.annual).toLocaleString() }}</span></div>
@@ -302,6 +361,8 @@
                 {name: 'リクルートカード', amount: 160000}, {name: 'ペイペイ', amount: 10000}, {name: '現金', amount: 20000},
                 {name: 'スーペイ', amount: 35000}, {name: '家具積立', amount: 20000}, {name: '教育積立', amount: 10000}
             ],
+            specialIncomes: [],
+            specialExpenses: [],
             transfersIn: [
                 {name: '年間積立へ繰入', amount: 65000, target: 'annual'}, {name: '旅行積立へ繰入', amount: 0, target: 'travel'}
             ],
@@ -313,11 +374,11 @@
         const safeClone = (dataArray, defaultArray) => {
             try {
                 if (!dataArray || !Array.isArray(dataArray) || dataArray.length === 0) {
-                    return JSON.parse(JSON.stringify(defaultArray));
+                    return JSON.parse(JSON.stringify(defaultArray || []));
                 }
                 return JSON.parse(JSON.stringify(dataArray));
             } catch (e) {
-                return JSON.parse(JSON.stringify(defaultArray));
+                return JSON.parse(JSON.stringify(defaultArray || []));
             }
         };
 
@@ -351,6 +412,8 @@
                             isClosed: false,
                             incomes: safeClone(baseSettings.value.incomes, defaultData.incomes),
                             expenses: safeClone(baseSettings.value.expenses, defaultData.expenses),
+                            specialIncomes: safeClone(baseSettings.value.specialIncomes, defaultData.specialIncomes),
+                            specialExpenses: safeClone(baseSettings.value.specialExpenses, defaultData.specialExpenses),
                             transfersIn: safeClone(baseSettings.value.transfersIn, defaultData.transfersIn),
                             transfersOut: safeClone(baseSettings.value.transfersOut, defaultData.transfersOut)
                         };
@@ -366,7 +429,7 @@
                     try {
                         const response = await fetch(API_URL);
                         const data = await response.json();
-                        
+
                         if (data && data.accounts) {
                             accounts.value = {
                                 savings: Number(data.accounts.savings) || 0,
@@ -374,21 +437,25 @@
                                 travel: Number(data.accounts.travel) || 0
                             };
                         }
-                        
+
                         if (data && data.baseSettings) {
                             baseSettings.value = {
                                 incomes: safeClone(data.baseSettings.incomes, defaultData.incomes),
                                 expenses: safeClone(data.baseSettings.expenses, defaultData.expenses),
+                                specialIncomes: safeClone(data.baseSettings.specialIncomes, defaultData.specialIncomes),
+                                specialExpenses: safeClone(data.baseSettings.specialExpenses, defaultData.specialExpenses),
                                 transfersIn: safeClone(data.baseSettings.transfersIn, defaultData.transfersIn),
                                 transfersOut: safeClone(data.baseSettings.transfersOut, defaultData.transfersOut)
                             };
                         }
-                        
+
                         if (data && data.monthsData) {
                             Object.keys(data.monthsData).forEach(k => {
                                 const m = data.monthsData[k];
                                 m.incomes = safeClone(m.incomes, baseSettings.value.incomes);
                                 m.expenses = safeClone(m.expenses, baseSettings.value.expenses);
+                                m.specialIncomes = safeClone(m.specialIncomes, baseSettings.value.specialIncomes);
+                                m.specialExpenses = safeClone(m.specialExpenses, baseSettings.value.specialExpenses);
                                 const loadedTransfersIn = m.transfersIn || m.transfers;
                                 m.transfersIn = safeClone(loadedTransfersIn, baseSettings.value.transfersIn);
                                 m.transfersOut = safeClone(m.transfersOut, baseSettings.value.transfersOut);
@@ -432,7 +499,7 @@
                 watch(currentMonthKey, (newKey) => {
                     if (!isLoading.value) ensureMonthData(newKey);
                 });
-                
+
                 watch(currentMode, async (newMode) => {
                     activePopup.value = null;
                     if (newMode === 'chart') {
@@ -451,9 +518,11 @@
 
                 const totalIncome = computed(() => safeSum(currentMonthData.value.incomes));
                 const totalExpense = computed(() => safeSum(currentMonthData.value.expenses));
+                const totalSpecialIncome = computed(() => safeSum(currentMonthData.value.specialIncomes));
+                const totalSpecialExpense = computed(() => safeSum(currentMonthData.value.specialExpenses));
                 const totalTransferIn = computed(() => safeSum(currentMonthData.value.transfersIn));
                 const totalTransferOut = computed(() => safeSum(currentMonthData.value.transfersOut));
-                
+
                 const currentMonthNet = computed(() => totalIncome.value - totalExpense.value - totalTransferIn.value + totalTransferOut.value);
 
                 const changeMonth = (d) => {
@@ -481,6 +550,8 @@
                             if (!monthsData.value[key].isClosed) {
                                 monthsData.value[key].incomes = safeClone(baseSettings.value.incomes, defaultData.incomes);
                                 monthsData.value[key].expenses = safeClone(baseSettings.value.expenses, defaultData.expenses);
+                                monthsData.value[key].specialIncomes = safeClone(baseSettings.value.specialIncomes, defaultData.specialIncomes);
+                                monthsData.value[key].specialExpenses = safeClone(baseSettings.value.specialExpenses, defaultData.specialExpenses);
                                 monthsData.value[key].transfersIn = safeClone(baseSettings.value.transfersIn, defaultData.transfersIn);
                                 monthsData.value[key].transfersOut = safeClone(baseSettings.value.transfersOut, defaultData.transfersOut);
                             }
@@ -488,21 +559,29 @@
                         currentMode.value = 'monthly';
                     }
                 };
-                
+
                 const justSaveAndClose = () => {
                     currentMode.value = 'monthly';
                 };
 
                 const closeMonth = () => {
                     if (currentMonthData.value.isClosed) return;
-                    if (confirm(`${currentMonthStr.value}の収支を確定しますか？\n残高の¥${Number(currentMonthNet.value || 0).toLocaleString()}は貯蓄口座に移動します。`)) {
+
+                    const msg = `${currentMonthStr.value}の収支を確定しますか？\n`
+                              + `当月残高の¥${Number(currentMonthNet.value || 0).toLocaleString()}が貯蓄口座に入金され、\n`
+                              + `特別収入/支出が貯蓄口座に反映されます。`;
+
+                    if (confirm(msg)) {
                         (currentMonthData.value.transfersIn || []).forEach(t => {
                             if (accounts.value[t.target] !== undefined) accounts.value[t.target] += (Number(t.amount) || 0);
                         });
                         (currentMonthData.value.transfersOut || []).forEach(t => {
                             if (accounts.value[t.target] !== undefined) accounts.value[t.target] -= (Number(t.amount) || 0);
                         });
-                        accounts.value.savings += currentMonthNet.value;
+
+                        // 貯蓄口座 = 当月残高 + 特別収入 - 特別支出
+                        accounts.value.savings += (currentMonthNet.value + totalSpecialIncome.value - totalSpecialExpense.value);
+
                         currentMonthData.value.isClosed = true;
                         saveData();
                     }
@@ -510,6 +589,7 @@
 
                 const cancelCloseMonth = () => {
                     if (!currentMonthData.value.isClosed) return;
+
                     if (confirm('確定をキャンセルして再編集可能にしますか？\n（入力した金額は消えずにそのまま保持されます）')) {
                         (currentMonthData.value.transfersIn || []).forEach(t => {
                             if (accounts.value[t.target] !== undefined) accounts.value[t.target] -= (Number(t.amount) || 0);
@@ -517,7 +597,10 @@
                         (currentMonthData.value.transfersOut || []).forEach(t => {
                             if (accounts.value[t.target] !== undefined) accounts.value[t.target] += (Number(t.amount) || 0);
                         });
-                        accounts.value.savings -= currentMonthNet.value;
+
+                        // 貯蓄口座のロールバック (確定時に足したものを引く)
+                        accounts.value.savings -= (currentMonthNet.value + totalSpecialIncome.value - totalSpecialExpense.value);
+
                         currentMonthData.value.isClosed = false;
                         saveData();
                     }
@@ -557,11 +640,15 @@
                     sortedKeys.forEach(key => {
                         const m = monthsData.value[key];
                         let net = 0;
+                        let spIn = 0, spOut = 0;
                         let trinAnnual = 0, troutAnnual = 0;
                         let trinTravel = 0, troutTravel = 0;
 
                         if (m.incomes && m.expenses && m.transfersIn && m.transfersOut) {
                             net = safeSum(m.incomes) - safeSum(m.expenses) - safeSum(m.transfersIn) + safeSum(m.transfersOut);
+                            spIn = safeSum(m.specialIncomes);
+                            spOut = safeSum(m.specialExpenses);
+
                             (m.transfersIn || []).forEach(t => {
                                 if (t.target === 'annual') trinAnnual += Number(t.amount) || 0;
                                 if (t.target === 'travel') trinTravel += Number(t.amount) || 0;
@@ -571,10 +658,10 @@
                                 if (t.target === 'travel') troutTravel += Number(t.amount) || 0;
                             });
                         }
-                        monthCalculations[key] = { net, trinAnnual, troutAnnual, trinTravel, troutTravel };
+                        monthCalculations[key] = { net, spIn, spOut, trinAnnual, troutAnnual, trinTravel, troutTravel };
 
                         if (m.isClosed) {
-                            runningSavings -= net;
+                            runningSavings -= (net + spIn - spOut);
                             runningAnnual -= (trinAnnual - troutAnnual);
                             runningTravel -= (trinTravel - troutTravel);
                         }
@@ -591,7 +678,7 @@
                         const calc = monthCalculations[key];
                         netData.push(calc.net);
 
-                        simSavings += calc.net;
+                        simSavings += (calc.net + calc.spIn - calc.spOut);
                         simAnnual += (calc.trinAnnual - calc.troutAnnual);
                         simTravel += (calc.trinTravel - calc.troutTravel);
 
@@ -612,6 +699,8 @@
                         popupDetails[key] = {
                             label: key,
                             net: calc.net,
+                            specialIn: calc.spIn,
+                            specialOut: calc.spOut,
                             savings: simSavings,
                             annual: simAnnual,
                             travel: simTravel,
@@ -681,7 +770,7 @@
                 return {
                     currentMonthStr, currentMonthData, baseSettings, accounts, currentMode,
                     isLoading, isSaving, activePopup, handleBodyClick,
-                    totalIncome, totalExpense, totalTransferIn, totalTransferOut, currentMonthNet,
+                    totalIncome, totalExpense, totalSpecialIncome, totalSpecialExpense, totalTransferIn, totalTransferOut, currentMonthNet,
                     changeMonth, closeMonth, cancelCloseMonth, exportData, addItem, removeItem, applySettingsAndClose, justSaveAndClose
                 };
             }
@@ -689,4 +778,3 @@
     </script>
 </body>
 </html>
-```
