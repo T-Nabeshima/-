@@ -780,17 +780,19 @@
                             options: {
                                 responsive: true,
                                 maintainAspectRatio: false, // 高さをCSSで制御するためにfalse
-                                scales: { y: 
-　　　{ beginAtZero: true 
-　　　　　　　// （オプション）値が小さくても最低限この値までは軸を表示してスケールを固定させる
-            suggestedMax: 100000, 
-            ticks: {
-　　　　　　　// 縦軸ラベルのフォーマット固定（金額表示）
-            callback: function(value) {
-                    return '¥' + value.toLocaleString();
-
-　　　} 
-},
+                                scales: y: {
+                                    // 縦軸を0から始めるように固定
+                                    beginAtZero: true,
+                                    // オプション: 固定値までの高さを確保（グラフのガタつきを抑える）
+                                    suggestedMax: 400000, 
+                                    ticks: {
+                                        // 縦軸のラベルフォーマットを金額（カンマ区切り）に固定
+                                        callback: function(value) {
+                                            return '¥' + value.toLocaleString();
+                                        }
+                                    }
+                                }
+                            },
 onClick: handleChartClick
                             }
                         });
@@ -812,15 +814,20 @@ onClick: handleChartClick
                             options: {
                                 responsive: true,
                                 maintainAspectRatio: false, // 高さをCSSで制御
-                                scales: { y: { beginAtZero: true 
-// （オプション）値が小さくても最低限この値までは軸を表示してスケールを固定させる
-            suggestedMax: 100000, 
-            ticks: {
-                // 縦軸ラベルのフォーマット固定（金額表示）
-                callback: function(value) {
-                    return '¥' + value.toLocaleString();
-
-} },
+                                
+scales: y: {
+                                    // 縦軸を0から始めるように固定
+                                    beginAtZero: true,
+                                    // オプション: 固定値までの高さを確保（グラフのガタつきを抑える）
+                                    suggestedMax: 400000, 
+                                    ticks: {
+                                        // 縦軸のラベルフォーマットを金額（カンマ区切り）に固定
+                                        callback: function(value) {
+                                            return '¥' + value.toLocaleString();
+                                        }
+                                    }
+                                }
+                            },
                     onClick: handleChartClick
                             }
                         });
