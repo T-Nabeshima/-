@@ -780,8 +780,18 @@
                             options: {
                                 responsive: true,
                                 maintainAspectRatio: false, // 高さをCSSで制御するためにfalse
-                                scales: { y: { beginAtZero: true } },
-                                onClick: handleChartClick
+                                scales: { y: 
+　　　{ beginAtZero: true 
+　　　　　　　// （オプション）値が小さくても最低限この値までは軸を表示してスケールを固定させる
+            suggestedMax: 100000, 
+            ticks: {
+　　　　　　　// 縦軸ラベルのフォーマット固定（金額表示）
+            callback: function(value) {
+                    return '¥' + value.toLocaleString();
+
+　　　} 
+},
+onClick: handleChartClick
                             }
                         });
                     }
@@ -802,8 +812,16 @@
                             options: {
                                 responsive: true,
                                 maintainAspectRatio: false, // 高さをCSSで制御
-                                scales: { y: { beginAtZero: true } },
-                                onClick: handleChartClick
+                                scales: { y: { beginAtZero: true 
+// （オプション）値が小さくても最低限この値までは軸を表示してスケールを固定させる
+            suggestedMax: 100000, 
+            ticks: {
+                // 縦軸ラベルのフォーマット固定（金額表示）
+                callback: function(value) {
+                    return '¥' + value.toLocaleString();
+
+} },
+                    onClick: handleChartClick
                             }
                         });
                     }
