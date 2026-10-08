@@ -1,37 +1,45 @@
+```html
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>家計・キャッシュフロー管理</title>
+    <!-- Vue.js -->
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Chart.jsの追加 -->
+    <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; background-color: #f3f4f6; }
         [v-cloak] { display: none; }
-        /* スクロールバーの非表示（見た目スッキリさせるため） */
-        .hide-scrollbar::-webkit-scrollbar { display: none; }
-        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* グラフ用ツールチップのカスタムスタイル */
+        #custom-tooltip {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            pointer-events: none;
+            opacity: 0;
+            transition: all 0.2s ease;
+            z-index: 50;
+            min-w-fit;
+        }
     </style>
 </head>
-<body class="text-gray-800" @click="handleBodyClick">
-
-    <!-- 万が一のシステムエラー表示用（普段は隠れています） -->
-    <div id="fatal-error" style="display:none; background:#fee2e2; color:#b91c1c; padding:15px; text-align:center; font-weight:bold;">
-        致命的なエラーが発生しました。<br><span id="error-msg" style="font-size:12px; font-weight:normal;"></span>
+<body class="text-gray-800">
+    <!-- 致命的エラー用のフォールバックバナー -->
+    <div id="fatal-error" style="display: none; background: #fee2e2; color: #991b1b; padding: 1rem; text-align: center; font-weight: bold; position: fixed; top: 0; width: 100%; z-index: 9999;">
+        致命的なエラーが発生しました。<br><span id="error-message" style="font-weight: normal; font-size: 0.875rem;"></span>
     </div>
-    <script>
-        window.addEventListener('error', function(e) {
-            document.getElementById('fatal-error').style.display = 'block';
-            document.getElementById('error-msg').innerText += e.message + ' | ';
-        });
-    </script>
-
+    
     <div id="app" v-cloak class="max-w-3xl mx-auto p-4 pb-20">
 
-        <!-- ローディング画面 -->
+        <!-- ローディングオーバーレイ -->
         <div v-if="isLoading" class="fixed inset-0 bg-white bg-opacity-90 flex items-center justify-center z-50">
             <div class="text-xl font-bold text-blue-600">クラウドからデータを読み込み中...</div>
         </div>
@@ -43,336 +51,260 @@
                     {{ isSaving ? '☁️ クラウドへ保存中...' : '✅ クラウド同期済' }}
                 </p>
             </div>
-            <div class="flex gap-2 text-sm">
-                <!-- モード切り替えボタン -->
-                <button v-if="currentMode === 'monthly' && !isLoading" @click.stop="currentMode = 'settings'" class="bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold px-3 py-1 rounded shadow-sm">⚙ 初期値設定</button>
-                <button v-if="currentMode === 'monthly' && !isLoading" @click.stop="currentMode = 'chart'" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 font-bold px-3 py-1 rounded shadow-sm">📊 グラフ</button>
-                <button v-if="currentMode !== 'monthly' && !isLoading" @click.stop="currentMode = 'monthly'; activePopup = null;" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded shadow-sm">戻る</button>
-                <button v-if="currentMode === 'monthly' && !isLoading" @click.stop="exportData" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded shadow-sm">エクスポート</button>
+            <div class="flex gap-2 text-sm flex-col md:flex-row items-end md:items-center">
+                <!-- モード切替ボタン -->
+                <button v-if="currentMode === 'monthly'" @click="currentMode = 'settings'" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-3 py-1 rounded shadow-sm flex items-center gap-1 font-bold">
+                    <span>⚙️</span> 設定
+                </button>
+                <button v-else @click="currentMode = 'monthly'" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded shadow-sm font-bold">
+                    ダッシュボードへ戻る
+                </button>
+                <button @click="exportData" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded shadow-sm border border-gray-300">出力</button>
+                <input type="file" ref="fileInput" @change="importData" class="hidden" accept=".json">
+                <button @click="$refs.fileInput.click()" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded shadow-sm border border-gray-300">復元</button>
             </div>
         </header>
 
-        <!-- メインコンテンツ -->
-        <div v-if="!isLoading">
+        <!-- メイン画面（月次モード） -->
+        <div v-show="currentMode === 'monthly'">
 
-            <!-- 【月次モード】 -->
-            <div v-if="currentMode === 'monthly'">
-                <!-- サマリー -->
-                <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                    <div class="bg-white p-4 rounded-lg shadow border-t-4 border-blue-500">
-                        <div class="text-xs text-gray-500 mb-1">当月収支</div>
-                        <div class="text-xl font-bold text-gray-700">¥{{ Number(currentMonthNet || 0).toLocaleString() }}</div>
-                    </div>
-                    <div class="bg-white p-4 rounded-lg shadow border-t-4 border-green-500">
-                        <div class="text-xs text-gray-500 mb-1">貯蓄口座</div>
-                        <div class="text-xl font-bold text-gray-700">¥{{ Number(accounts.savings || 0).toLocaleString() }}</div>
-                    </div>
-                    <div class="bg-white p-4 rounded-lg shadow border-t-4 border-yellow-500">
-                        <div class="text-xs text-gray-500 mb-1">年間積立</div>
-                        <div class="text-xl font-bold text-gray-700">¥{{ Number(accounts.annual || 0).toLocaleString() }}</div>
-                    </div>
-                    <div class="bg-white p-4 rounded-lg shadow border-t-4 border-purple-500">
-                        <div class="text-xs text-gray-500 mb-1">旅行積立</div>
-                        <div class="text-xl font-bold text-gray-700">¥{{ Number(accounts.travel || 0).toLocaleString() }}</div>
-                    </div>
-                </section>
-
-                <!-- 月選択 -->
-                <div class="flex justify-between items-center bg-white p-4 rounded-t-lg shadow-sm mb-1 border-b">
-                    <button @click="changeMonth(-1)" class="text-gray-500 hover:bg-gray-100 px-3 py-1 rounded">&lt; 前月</button>
-                    <h2 class="text-xl font-bold">{{ currentMonthStr }}</h2>
-                    <button @click="changeMonth(1)" class="text-gray-500 hover:bg-gray-100 px-3 py-1 rounded">次月 &gt;</button>
+            <!-- 口座残高サマリー -->
+            <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                <div class="bg-white p-4 rounded-lg shadow border-t-4 border-blue-500">
+                    <div class="text-xs text-gray-500 mb-1 font-bold">当月収支</div>
+                    <div class="text-xl font-bold text-gray-700 font-mono">¥{{ Number(currentMonthNet || 0).toLocaleString() }}</div>
                 </div>
-
-                <!-- 入力エリア -->
-                <div class="bg-white p-3 md:p-4 rounded-b-lg shadow-sm mb-6 relative">
-                    <div v-if="currentMonthData.isClosed" class="absolute inset-0 bg-gray-50 bg-opacity-70 flex items-center justify-center z-10 rounded-b-lg">
-                        <div class="text-center">
-                            <span class="bg-green-100 text-green-800 font-bold px-4 py-2 rounded-full border border-green-300 shadow">この月は確定済みです</span>
-                        </div>
-                    </div>
-
-                    <!-- 収入 -->
-                    <div class="flex justify-between items-center mb-3 border-b-2 border-blue-100 pb-1">
-                        <h3 class="font-bold text-blue-600">収入項目 <span class="text-sm">(計: ¥{{ Number(totalIncome || 0).toLocaleString() }})</span></h3>
-                        <button v-if="!currentMonthData.isClosed" @click="addItem(currentMonthData.incomes, 'normal')" class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1 rounded">＋ 追加</button>
-                    </div>
-                    <div class="space-y-2 mb-6">
-                        <div v-for="(item, index) in currentMonthData.incomes" :key="'m-in'+index" class="flex items-center gap-1.5">
-                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
-                            <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
-                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
-                            <button v-if="!currentMonthData.isClosed" @click="removeItem(currentMonthData.incomes, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
-                        </div>
-                    </div>
-
-                    <!-- 支出 -->
-                    <div class="flex justify-between items-center mb-3 border-b-2 border-red-100 pb-1">
-                        <h3 class="font-bold text-red-600">支出項目 <span class="text-sm">(計: ¥{{ Number(totalExpense || 0).toLocaleString() }})</span></h3>
-                        <button v-if="!currentMonthData.isClosed" @click="addItem(currentMonthData.expenses, 'normal')" class="text-xs bg-red-50 text-red-600 border border-red-200 px-2 py-1 rounded">＋ 追加</button>
-                    </div>
-                    <div class="space-y-2 mb-6">
-                        <div v-for="(item, index) in currentMonthData.expenses" :key="'m-out'+index" class="flex items-center gap-1.5">
-                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
-                            <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
-                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
-                            <button v-if="!currentMonthData.isClosed" @click="removeItem(currentMonthData.expenses, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
-                        </div>
-                    </div>
-
-                    <!-- 特別収入 -->
-                    <div class="flex justify-between items-center mb-3 border-b-2 border-teal-100 pb-1">
-                        <h3 class="font-bold text-teal-600">特別収入 <span class="text-xs text-gray-500 font-normal">※収支外・貯蓄へ加算</span> <span class="text-sm">(計: ¥{{ Number(totalSpecialIncome || 0).toLocaleString() }})</span></h3>
-                        <button v-if="!currentMonthData.isClosed" @click="addItem(currentMonthData.specialIncomes, 'normal')" class="text-xs bg-teal-50 text-teal-600 border border-teal-200 px-2 py-1 rounded">＋ 追加</button>
-                    </div>
-                    <div class="space-y-2 mb-6">
-                        <div v-for="(item, index) in currentMonthData.specialIncomes" :key="'m-spin'+index" class="flex items-center gap-1.5">
-                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
-                            <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
-                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
-                            <button v-if="!currentMonthData.isClosed" @click="removeItem(currentMonthData.specialIncomes, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
-                        </div>
-                    </div>
-
-                    <!-- 特別支出 -->
-                    <div class="flex justify-between items-center mb-3 border-b-2 border-orange-100 pb-1">
-                        <h3 class="font-bold text-orange-600">特別支出 <span class="text-xs text-gray-500 font-normal">※収支外・貯蓄から引落</span> <span class="text-sm">(計: ¥{{ Number(totalSpecialExpense || 0).toLocaleString() }})</span></h3>
-                        <button v-if="!currentMonthData.isClosed" @click="addItem(currentMonthData.specialExpenses, 'normal')" class="text-xs bg-orange-50 text-orange-600 border border-orange-200 px-2 py-1 rounded">＋ 追加</button>
-                    </div>
-                    <div class="space-y-2 mb-6">
-                        <div v-for="(item, index) in currentMonthData.specialExpenses" :key="'m-spout'+index" class="flex items-center gap-1.5">
-                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50" :disabled="currentMonthData.isClosed">
-                            <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
-                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
-                            <button v-if="!currentMonthData.isClosed" @click="removeItem(currentMonthData.specialExpenses, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
-                        </div>
-                    </div>
-
-                    <!-- 繰入 -->
-                    <div class="flex justify-between items-center mb-3 border-b-2 border-yellow-100 pb-1">
-                        <h3 class="font-bold text-yellow-600">繰入（積立などへ） <span class="text-sm">(計: ¥{{ Number(totalTransferIn || 0).toLocaleString() }})</span></h3>
-                        <button v-if="!currentMonthData.isClosed" @click="addItem(currentMonthData.transfersIn, 'transfer')" class="text-xs bg-yellow-50 text-yellow-700 border border-yellow-200 px-2 py-1 rounded">＋ 追加</button>
-                    </div>
-                    <div class="space-y-2 mb-6">
-                        <div v-for="(item, index) in currentMonthData.transfersIn" :key="'m-trin'+index" class="flex items-center gap-1">
-                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-1 py-1 text-xs bg-gray-50" :disabled="currentMonthData.isClosed">
-                            <select v-model="item.target" class="w-20 shrink-0 border-gray-300 border rounded px-0 py-1 text-xs bg-gray-50 text-gray-700" :disabled="currentMonthData.isClosed">
-                                <option value="annual">年間積立</option>
-                                <option value="travel">旅行積立</option>
-                                <option value="savings">貯蓄口座</option>
-                            </select>
-                            <input v-model.number="item.amount" type="number" class="w-20 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
-                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
-                            <button v-if="!currentMonthData.isClosed" @click="removeItem(currentMonthData.transfersIn, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
-                        </div>
-                    </div>
-
-                    <!-- 引出し -->
-                    <div class="flex justify-between items-center mb-3 border-b-2 border-purple-100 pb-1">
-                        <h3 class="font-bold text-purple-600">引出し（積立などから） <span class="text-sm">(計: ¥{{ Number(totalTransferOut || 0).toLocaleString() }})</span></h3>
-                        <button v-if="!currentMonthData.isClosed" @click="addItem(currentMonthData.transfersOut, 'transfer')" class="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-2 py-1 rounded">＋ 追加</button>
-                    </div>
-                    <div class="space-y-2 mb-6">
-                        <div v-for="(item, index) in currentMonthData.transfersOut" :key="'m-trout'+index" class="flex items-center gap-1">
-                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-1 py-1 text-xs bg-gray-50" :disabled="currentMonthData.isClosed">
-                            <select v-model="item.target" class="w-20 shrink-0 border-gray-300 border rounded px-0 py-1 text-xs bg-gray-50 text-gray-700" :disabled="currentMonthData.isClosed">
-                                <option value="annual">年間積立</option>
-                                <option value="travel">旅行積立</option>
-                                <option value="savings">貯蓄口座</option>
-                            </select>
-                            <input v-model.number="item.amount" type="number" class="w-20 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono" :disabled="currentMonthData.isClosed">
-                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
-                            <button v-if="!currentMonthData.isClosed" @click="removeItem(currentMonthData.transfersOut, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
-                        </div>
-                    </div>
-
-                    <div class="bg-gray-100 p-4 rounded flex justify-between items-center mb-6 border border-gray-200">
-                        <span class="font-bold text-sm md:text-base">当月残高 (貯蓄への入金予定)</span>
-                        <span class="text-lg md:text-xl font-bold" :class="currentMonthNet >= 0 ? 'text-blue-600' : 'text-red-600'">¥{{ Number(currentMonthNet || 0).toLocaleString() }}</span>
-                    </div>
+                <div class="bg-white p-4 rounded-lg shadow border-t-4 border-green-500">
+                    <div class="text-xs text-gray-500 mb-1 font-bold">貯蓄口座</div>
+                    <div class="text-xl font-bold text-gray-700 font-mono">¥{{ Number(accounts.savings || 0).toLocaleString() }}</div>
                 </div>
-
-                <!-- 確定ボタン -->
-                <div class="flex gap-4">
-                    <button v-if="!currentMonthData.isClosed" @click="closeMonth" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded shadow-lg transition-colors">
-                        この月の収支を確定する
-                    </button>
-                    <button v-if="currentMonthData.isClosed" @click="cancelCloseMonth" class="flex-1 bg-red-100 hover:bg-red-200 text-red-700 border border-red-300 font-bold py-3 px-4 rounded transition-colors">
-                        確定をキャンセル
-                    </button>
+                <div class="bg-white p-4 rounded-lg shadow border-t-4 border-yellow-500">
+                    <div class="text-xs text-gray-500 mb-1 font-bold">年間積立</div>
+                    <div class="text-xl font-bold text-gray-700 font-mono">¥{{ Number(accounts.annual || 0).toLocaleString() }}</div>
                 </div>
+                <div class="bg-white p-4 rounded-lg shadow border-t-4 border-purple-500">
+                    <div class="text-xs text-gray-500 mb-1 font-bold">旅行積立</div>
+                    <div class="text-xl font-bold text-gray-700 font-mono">¥{{ Number(accounts.travel || 0).toLocaleString() }}</div>
+                </div>
+            </section>
+
+            <!-- 月選択 -->
+            <div class="flex justify-between items-center bg-white p-4 rounded-t-lg shadow-sm mb-1 border-b border-gray-200 relative z-20">
+                <button @click="changeMonth(-1)" class="text-gray-600 hover:bg-gray-100 px-4 py-2 rounded-lg font-bold bg-gray-50 border border-gray-200">&lt; 前月</button>
+                <h2 class="text-2xl font-bold text-gray-800">{{ currentMonthStr }}</h2>
+                <button @click="changeMonth(1)" class="text-gray-600 hover:bg-gray-100 px-4 py-2 rounded-lg font-bold bg-gray-50 border border-gray-200">次月 &gt;</button>
             </div>
 
-            <!-- 【設定モード】 -->
-            <div v-if="currentMode === 'settings'">
-                <div class="bg-blue-50 p-4 rounded-t-lg shadow-sm mb-1 border-b text-center">
-                    <h2 class="text-lg font-bold text-blue-800">⚙️ 「初期値（予算）」マスタ設定</h2>
-                    <p class="text-xs text-blue-600 mt-1">追加・変更した内容は、新しい月を開いた際に自動適用されます。</p>
-                </div>
-
-                <div class="bg-white p-3 md:p-4 rounded-b-lg shadow-sm mb-6">
-                    <div class="flex justify-between items-center mb-3 border-b-2 border-blue-100 pb-1">
-                        <h3 class="font-bold text-blue-600">収入項目</h3>
-                        <button @click="addItem(baseSettings.incomes, 'normal')" class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1 rounded">＋ 追加</button>
-                    </div>
-                    <div class="space-y-2 mb-6">
-                        <div v-for="(item, index) in baseSettings.incomes" :key="'s-in'+index" class="flex items-center gap-1.5">
-                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50">
-                            <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono">
-                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
-                            <button @click="removeItem(baseSettings.incomes, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
-                        </div>
-                    </div>
-
-                    <div class="flex justify-between items-center mb-3 border-b-2 border-red-100 pb-1">
-                        <h3 class="font-bold text-red-600">支出項目</h3>
-                        <button @click="addItem(baseSettings.expenses, 'normal')" class="text-xs bg-red-50 text-red-600 border border-red-200 px-2 py-1 rounded">＋ 追加</button>
-                    </div>
-                    <div class="space-y-2 mb-6">
-                        <div v-for="(item, index) in baseSettings.expenses" :key="'s-out'+index" class="flex items-center gap-1.5">
-                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50">
-                            <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono">
-                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
-                            <button @click="removeItem(baseSettings.expenses, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
-                        </div>
-                    </div>
-
-                    <div class="flex justify-between items-center mb-3 border-b-2 border-teal-100 pb-1">
-                        <h3 class="font-bold text-teal-600">特別収入 (初期マスタ)</h3>
-                        <button @click="addItem(baseSettings.specialIncomes, 'normal')" class="text-xs bg-teal-50 text-teal-600 border border-teal-200 px-2 py-1 rounded">＋ 追加</button>
-                    </div>
-                    <div class="space-y-2 mb-6">
-                        <div v-for="(item, index) in baseSettings.specialIncomes" :key="'s-spin'+index" class="flex items-center gap-1.5">
-                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50">
-                            <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono">
-                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
-                            <button @click="removeItem(baseSettings.specialIncomes, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
-                        </div>
-                    </div>
-
-                    <div class="flex justify-between items-center mb-3 border-b-2 border-orange-100 pb-1">
-                        <h3 class="font-bold text-orange-600">特別支出 (初期マスタ)</h3>
-                        <button @click="addItem(baseSettings.specialExpenses, 'normal')" class="text-xs bg-orange-50 text-orange-600 border border-orange-200 px-2 py-1 rounded">＋ 追加</button>
-                    </div>
-                    <div class="space-y-2 mb-6">
-                        <div v-for="(item, index) in baseSettings.specialExpenses" :key="'s-spout'+index" class="flex items-center gap-1.5">
-                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-2 py-1 text-sm bg-gray-50">
-                            <input v-model.number="item.amount" type="number" class="w-24 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono">
-                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
-                            <button @click="removeItem(baseSettings.specialExpenses, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
-                        </div>
-                    </div>
-
-                    <div class="flex justify-between items-center mb-3 border-b-2 border-yellow-100 pb-1">
-                        <h3 class="font-bold text-yellow-600">繰入（積立などへ）</h3>
-                        <button @click="addItem(baseSettings.transfersIn, 'transfer')" class="text-xs bg-yellow-50 text-yellow-700 border border-yellow-200 px-2 py-1 rounded">＋ 追加</button>
-                    </div>
-                    <div class="space-y-2 mb-6">
-                        <div v-for="(item, index) in baseSettings.transfersIn" :key="'s-trin'+index" class="flex items-center gap-1">
-                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-1 py-1 text-xs bg-gray-50">
-                            <select v-model="item.target" class="w-20 shrink-0 border-gray-300 border rounded px-0 py-1 text-xs bg-gray-50 text-gray-700">
-                                <option value="annual">年間積立</option>
-                                <option value="travel">旅行積立</option>
-                                <option value="savings">貯蓄口座</option>
-                            </select>
-                            <input v-model.number="item.amount" type="number" class="w-20 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono">
-                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
-                            <button @click="removeItem(baseSettings.transfersIn, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
-                        </div>
-                    </div>
-
-                    <div class="flex justify-between items-center mb-3 border-b-2 border-purple-100 pb-1">
-                        <h3 class="font-bold text-purple-600">引出し（積立などから）</h3>
-                        <button @click="addItem(baseSettings.transfersOut, 'transfer')" class="text-xs bg-purple-50 text-purple-600 border border-purple-200 px-2 py-1 rounded">＋ 追加</button>
-                    </div>
-                    <div class="space-y-2 mb-6">
-                        <div v-for="(item, index) in baseSettings.transfersOut" :key="'s-trout'+index" class="flex items-center gap-1">
-                            <input v-model="item.name" class="flex-1 min-w-0 border-gray-300 border rounded px-1 py-1 text-xs bg-gray-50">
-                            <select v-model="item.target" class="w-20 shrink-0 border-gray-300 border rounded px-0 py-1 text-xs bg-gray-50 text-gray-700">
-                                <option value="annual">年間積立</option>
-                                <option value="travel">旅行積立</option>
-                                <option value="savings">貯蓄口座</option>
-                            </select>
-                            <input v-model.number="item.amount" type="number" class="w-20 shrink-0 border-gray-300 border rounded px-1 py-1 text-right text-sm font-mono">
-                            <span class="text-gray-500 text-xs shrink-0 w-4">円</span>
-                            <button @click="removeItem(baseSettings.transfersOut, index)" class="w-6 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center">×</button>
-                        </div>
+            <!-- 月次データ入力エリア -->
+            <div class="bg-white p-4 md:p-6 rounded-b-lg shadow-sm mb-6 relative">
+                <!-- 確定済みオーバーレイ -->
+                <div v-if="currentMonthData.isClosed" class="absolute inset-0 bg-gray-50 bg-opacity-70 flex items-center justify-center z-10 rounded-b-lg backdrop-blur-[1px]">
+                    <div class="text-center">
+                        <span class="bg-green-100 text-green-800 font-bold px-6 py-3 rounded-full border-2 border-green-400 shadow-lg text-lg flex items-center gap-2">
+                            <span>🔒</span> この月は確定済みです
+                        </span>
                     </div>
                 </div>
 
-                <div class="flex flex-col gap-3">
-                    <button @click="applySettingsAndClose" class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 px-4 rounded shadow-lg transition-colors">
-                        マスタを保存し、開いたことのある「未確定月」にも上書きして戻る
-                    </button>
-                    <button @click="justSaveAndClose" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded shadow-lg transition-colors">
-                        マスタのみ保存して戻る（今後の新しい月にのみ適用）
-                    </button>
+                <!-- 収入 -->
+                <div class="flex justify-between items-end mb-3 border-b-2 border-blue-200 pb-2 mt-2">
+                    <h3 class="font-bold text-blue-700 text-lg flex items-center gap-2"><span>📥</span> 収入項目 <span class="text-sm font-normal text-gray-500 ml-2">(計: ¥{{ Number(totalIncome || 0).toLocaleString() }})</span></h3>
+                    <button v-if="!currentMonthData.isClosed" @click="addItem('incomes')" class="text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-300 px-3 py-1.5 rounded shadow-sm font-bold transition-colors">＋ 追加</button>
                 </div>
-            </div>
-
-            <!-- 【グラフモード】 -->
-            <div v-if="currentMode === 'chart'" @click.stop>
-                <div class="bg-indigo-50 p-4 rounded-t-lg shadow-sm mb-1 border-b text-center">
-                    <h2 class="text-lg font-bold text-indigo-800">📊 グラフ推移</h2>
-                    <p class="text-xs text-indigo-600 mt-1">各月の点や棒をタップすると詳細が表示されます。<br>左右にスクロールして過去のデータを確認できます。</p>
-                </div>
-
-                <div class="bg-white p-4 rounded-b-lg shadow-sm mb-6 relative">
-                    <!-- タップ時ポップアップ詳細カード -->
-                    <div v-if="activePopup" class="mb-4 bg-blue-50 border border-blue-200 p-4 rounded-lg shadow relative">
-                        <button @click="activePopup = null" class="absolute top-2 right-3 text-gray-400 hover:text-gray-600 font-bold text-lg">×</button>
-                        <h4 class="font-bold text-blue-900 text-base mb-2 border-b pb-1">📅 {{ activePopup.label }} の詳細</h4>
-                        <div class="grid grid-cols-2 gap-2 text-sm text-gray-700">
-                            <div>当月収支: <span class="font-bold" :class="activePopup.net >= 0 ? 'text-blue-600' : 'text-red-600'">¥{{ Number(activePopup.net).toLocaleString() }}</span></div>
-                            <div v-if="activePopup.specialIn > 0">特別収入: <span class="font-bold text-teal-600">¥{{ Number(activePopup.specialIn).toLocaleString() }}</span></div>
-                            <div v-if="activePopup.specialOut > 0">特別支出: <span class="font-bold text-orange-600">¥{{ Number(activePopup.specialOut).toLocaleString() }}</span></div>
-                            <div class="col-span-2 border-t border-blue-200 my-1"></div>
-                            <div>ステータス: <span class="font-bold" :class="activePopup.isClosed ? 'text-green-600' : 'text-orange-500'">{{ activePopup.isClosed ? '✅ 確定済み' : '⏳ 予測' }}</span></div>
-                            <div>貯蓄口座: <span class="font-bold">¥{{ Number(activePopup.savings).toLocaleString() }}</span></div>
-                            <div>年間積立: <span class="font-bold">¥{{ Number(activePopup.annual).toLocaleString() }}</span></div>
-                            <div>旅行積立: <span class="font-bold">¥{{ Number(activePopup.travel).toLocaleString() }}</span></div>
-                        </div>
+                <div class="space-y-3 mb-8">
+                    <div v-for="(item, index) in currentMonthData.incomes" :key="'in'+index" class="flex items-center gap-2">
+                        <input v-model="item.name" class="w-[45%] border-gray-300 border rounded-md px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" :disabled="currentMonthData.isClosed" placeholder="項目名">
+                        <input v-model.number="item.amount" type="number" class="w-[45%] border-gray-300 border rounded-md px-3 py-2 text-right text-sm font-mono focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" :disabled="currentMonthData.isClosed">
+                        <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
+                        <button v-if="!currentMonthData.isClosed" @click="removeItem('incomes', index)" class="w-[4%] text-gray-300 hover:text-red-500 font-bold text-xl text-center leading-none">&times;</button>
                     </div>
+                </div>
 
-                    <!-- スクロールコンテナ1: 月別収支推移 -->
-                    <div class="mb-8">
-                        <h3 class="font-bold text-center mb-2 text-gray-700">月別収支推移 (当月収支)</h3>
-                        <div class="flex justify-center text-xs gap-4 mb-2 text-gray-500">
-                            <span class="flex items-center gap-1"><span class="w-3 h-3 inline-block bg-blue-500 rounded-full"></span> 確定済み</span>
-                            <span class="flex items-center gap-1"><span class="w-3 h-3 inline-block bg-orange-400 rounded-full"></span> 予測 (未確定)</span>
+                <!-- 支出 -->
+                <div class="flex justify-between items-end mb-3 border-b-2 border-red-200 pb-2">
+                    <h3 class="font-bold text-red-700 text-lg flex items-center gap-2"><span>📤</span> 支出項目 <span class="text-sm font-normal text-gray-500 ml-2">(計: ¥{{ Number(totalExpense || 0).toLocaleString() }})</span></h3>
+                    <button v-if="!currentMonthData.isClosed" @click="addItem('expenses')" class="text-xs bg-red-50 hover:bg-red-100 text-red-700 border border-red-300 px-3 py-1.5 rounded shadow-sm font-bold transition-colors">＋ 追加</button>
+                </div>
+                <div class="space-y-3 mb-8">
+                    <div v-for="(item, index) in currentMonthData.expenses" :key="'out'+index" class="flex items-center gap-2">
+                        <input v-model="item.name" class="w-[45%] border-gray-300 border rounded-md px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-red-500 outline-none transition-all" :disabled="currentMonthData.isClosed" placeholder="項目名">
+                        <input v-model.number="item.amount" type="number" class="w-[45%] border-gray-300 border rounded-md px-3 py-2 text-right text-sm font-mono focus:bg-white focus:ring-2 focus:ring-red-500 outline-none transition-all" :disabled="currentMonthData.isClosed">
+                        <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
+                        <button v-if="!currentMonthData.isClosed" @click="removeItem('expenses', index)" class="w-[4%] text-gray-300 hover:text-red-500 font-bold text-xl text-center leading-none">&times;</button>
+                    </div>
+                </div>
+
+                <!-- 特別収入 -->
+                <div class="flex justify-between items-end mb-3 border-b-2 border-blue-100 pb-2">
+                    <h3 class="font-bold text-blue-500 text-sm md:text-base flex items-center gap-2"><span>✨</span> 特別収入 <span class="text-xs text-gray-500 font-normal">※収支外・貯蓄へ加算</span> <span class="text-xs font-normal text-gray-500 ml-1">(計: ¥{{ Number(totalSpecialIncome || 0).toLocaleString() }})</span></h3>
+                    <button v-if="!currentMonthData.isClosed" @click="addItem('specialIncomes')" class="text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 px-2 py-1 rounded shadow-sm font-bold transition-colors">＋ 追加</button>
+                </div>
+                <div class="space-y-3 mb-8">
+                    <div v-for="(item, index) in currentMonthData.specialIncomes" :key="'spin'+index" class="flex items-center gap-2">
+                        <input v-model="item.name" class="w-[45%] border-gray-300 border rounded-md px-3 py-2 text-sm bg-blue-50 focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none transition-all" :disabled="currentMonthData.isClosed" placeholder="項目名">
+                        <input v-model.number="item.amount" type="number" class="w-[45%] border-gray-300 border rounded-md px-3 py-2 text-right text-sm font-mono focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none transition-all" :disabled="currentMonthData.isClosed">
+                        <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
+                        <button v-if="!currentMonthData.isClosed" @click="removeItem('specialIncomes', index)" class="w-[4%] text-gray-300 hover:text-red-500 font-bold text-xl text-center leading-none">&times;</button>
+                    </div>
+                </div>
+
+                <!-- 特別支出 -->
+                <div class="flex justify-between items-end mb-3 border-b-2 border-red-100 pb-2">
+                    <h3 class="font-bold text-red-500 text-sm md:text-base flex items-center gap-2"><span>💥</span> 特別支出 <span class="text-xs text-gray-500 font-normal">※収支外・貯蓄から引落</span> <span class="text-xs font-normal text-gray-500 ml-1">(計: ¥{{ Number(totalSpecialExpense || 0).toLocaleString() }})</span></h3>
+                    <button v-if="!currentMonthData.isClosed" @click="addItem('specialExpenses')" class="text-xs bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-2 py-1 rounded shadow-sm font-bold transition-colors">＋ 追加</button>
+                </div>
+                <div class="space-y-3 mb-8">
+                    <div v-for="(item, index) in currentMonthData.specialExpenses" :key="'spout'+index" class="flex items-center gap-2">
+                        <input v-model="item.name" class="w-[45%] border-gray-300 border rounded-md px-3 py-2 text-sm bg-red-50 focus:bg-white focus:ring-2 focus:ring-red-400 outline-none transition-all" :disabled="currentMonthData.isClosed" placeholder="項目名">
+                        <input v-model.number="item.amount" type="number" class="w-[45%] border-gray-300 border rounded-md px-3 py-2 text-right text-sm font-mono focus:bg-white focus:ring-2 focus:ring-red-400 outline-none transition-all" :disabled="currentMonthData.isClosed">
+                        <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
+                        <button v-if="!currentMonthData.isClosed" @click="removeItem('specialExpenses', index)" class="w-[4%] text-gray-300 hover:text-red-500 font-bold text-xl text-center leading-none">&times;</button>
+                    </div>
+                </div>
+
+                <!-- 繰入 -->
+                <div class="flex justify-between items-end mb-3 border-b-2 border-yellow-200 pb-2">
+                    <h3 class="font-bold text-yellow-700 text-base md:text-lg flex items-center gap-2"><span>➡️</span> 繰入（積立などへ） <span class="text-sm font-normal text-gray-500 ml-2">(計: ¥{{ Number(totalTransferIn || 0).toLocaleString() }})</span></h3>
+                    <button v-if="!currentMonthData.isClosed" @click="addItem('transfersIn')" class="text-xs bg-yellow-50 hover:bg-yellow-100 text-yellow-800 border border-yellow-300 px-3 py-1.5 rounded shadow-sm font-bold transition-colors">＋ 追加</button>
+                </div>
+                <div class="space-y-3 mb-8">
+                    <div v-for="(item, index) in currentMonthData.transfersIn" :key="'trin'+index" class="flex items-center gap-1.5 md:gap-2">
+                        <input v-model="item.name" class="w-[30%] md:w-[35%] border-gray-300 border rounded-md px-2 md:px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-yellow-500 outline-none transition-all" :disabled="currentMonthData.isClosed" placeholder="項目名">
+                        <select v-model="item.target" class="w-[28%] md:w-[25%] border-gray-300 border rounded-md px-1 md:px-2 py-2 text-xs md:text-sm bg-gray-50 text-gray-700 focus:bg-white focus:ring-2 focus:ring-yellow-500 outline-none transition-all" :disabled="currentMonthData.isClosed">
+                            <option value="annual">年間積立</option>
+                            <option value="travel">旅行積立</option>
+                            <option value="savings">貯蓄口座</option>
+                        </select>
+                        <input v-model.number="item.amount" type="number" class="w-[32%] md:w-[30%] border-gray-300 border rounded-md px-2 md:px-3 py-2 text-right text-sm font-mono focus:bg-white focus:ring-2 focus:ring-yellow-500 outline-none transition-all" :disabled="currentMonthData.isClosed">
+                        <span class="text-gray-500 text-xs w-[6%] md:w-[6%] text-center">円</span>
+                        <button v-if="!currentMonthData.isClosed" @click="removeItem('transfersIn', index)" class="w-[4%] text-gray-300 hover:text-red-500 font-bold text-xl text-center leading-none">&times;</button>
+                    </div>
+                </div>
+
+                <!-- 引出し -->
+                <div class="flex justify-between items-end mb-3 border-b-2 border-purple-200 pb-2">
+                    <h3 class="font-bold text-purple-700 text-base md:text-lg flex items-center gap-2"><span>⬅️</span> 引出し（積立などから） <span class="text-sm font-normal text-gray-500 ml-2">(計: ¥{{ Number(totalTransferOut || 0).toLocaleString() }})</span></h3>
+                    <button v-if="!currentMonthData.isClosed" @click="addItem('transfersOut')" class="text-xs bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-300 px-3 py-1.5 rounded shadow-sm font-bold transition-colors">＋ 追加</button>
+                </div>
+                <div class="space-y-3 mb-8">
+                    <div v-for="(item, index) in currentMonthData.transfersOut" :key="'trout'+index" class="flex items-center gap-1.5 md:gap-2">
+                        <input v-model="item.name" class="w-[30%] md:w-[35%] border-gray-300 border rounded-md px-2 md:px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-purple-500 outline-none transition-all" :disabled="currentMonthData.isClosed" placeholder="項目名">
+                        <select v-model="item.target" class="w-[28%] md:w-[25%] border-gray-300 border rounded-md px-1 md:px-2 py-2 text-xs md:text-sm bg-gray-50 text-gray-700 focus:bg-white focus:ring-2 focus:ring-purple-500 outline-none transition-all" :disabled="currentMonthData.isClosed">
+                            <option value="annual">年間積立</option>
+                            <option value="travel">旅行積立</option>
+                            <option value="savings">貯蓄口座</option>
+                        </select>
+                        <input v-model.number="item.amount" type="number" class="w-[32%] md:w-[30%] border-gray-300 border rounded-md px-2 md:px-3 py-2 text-right text-sm font-mono focus:bg-white focus:ring-2 focus:ring-purple-500 outline-none transition-all" :disabled="currentMonthData.isClosed">
+                        <span class="text-gray-500 text-xs w-[6%] md:w-[6%] text-center">円</span>
+                        <button v-if="!currentMonthData.isClosed" @click="removeItem('transfersOut', index)" class="w-[4%] text-gray-300 hover:text-red-500 font-bold text-xl text-center leading-none">&times;</button>
+                    </div>
+                </div>
+
+                <!-- 各セグメント収支サマリー -->
+                <div class="bg-gray-100 p-4 md:p-5 rounded-lg mb-6 border border-gray-200 shadow-sm">
+                    <h3 class="font-bold text-gray-700 mb-3 border-b border-gray-300 pb-2 text-lg">当月セグメント別 収支サマリー</h3>
+                    <div class="space-y-2 text-sm md:text-base mb-5">
+                        <!-- A. 収支 -->
+                        <div class="flex justify-between items-center bg-white p-2.5 rounded shadow-sm border border-gray-100">
+                            <span class="font-bold text-gray-600">A. 収支 <span class="text-xs md:text-sm font-normal text-gray-400 ml-1">(収入 - 支出)</span></span>
+                            <span class="font-mono text-base md:text-lg font-bold" :class="(Number(totalIncome || 0) - Number(totalExpense || 0)) >= 0 ? 'text-blue-600' : 'text-red-600'">
+                                ¥{{ Number((totalIncome || 0) - (totalExpense || 0)).toLocaleString() }}
+                            </span>
                         </div>
                         
-                        <!-- 左右分割レイアウト -->
-                        <div class="flex w-full relative">
-                            <!-- 左側: 固定Y軸エリア -->
-                            <div class="flex-none bg-white z-10" style="width: 60px; height: 250px;">
-                                <canvas id="balanceChartY"></canvas>
-                            </div>
-                            <!-- 右側: スクロールデータエリア -->
-                            <div class="overflow-x-auto hide-scrollbar flex-1" ref="chartScrollContainer1">
-                                <!-- データ数に応じて動的に幅を広げる -->
-                                <div :style="{ width: chartWidth + 'px', minWidth: '100%', height: '250px' }">
-                                    <canvas id="balanceChart"></canvas>
-                                </div>
+                        <!-- B. 特別収支 -->
+                        <div class="flex justify-between items-center bg-white p-2.5 rounded shadow-sm border border-gray-100">
+                            <span class="font-bold text-gray-600">B. 特別収支 <span class="text-xs md:text-sm font-normal text-gray-400 ml-1">(特別収入 - 特別支出)</span></span>
+                            <span class="font-mono text-base md:text-lg font-bold" :class="(Number(totalSpecialIncome || 0) - Number(totalSpecialExpense || 0)) >= 0 ? 'text-blue-500' : 'text-red-500'">
+                                ¥{{ Number((totalSpecialIncome || 0) - (totalSpecialExpense || 0)).toLocaleString() }}
+                            </span>
+                        </div>
+                        
+                        <!-- C. 振替 -->
+                        <div class="flex justify-between items-center bg-white p-2.5 rounded shadow-sm border border-gray-100">
+                            <span class="font-bold text-gray-600">C. 振替 <span class="text-xs md:text-sm font-normal text-gray-400 ml-1">(引出 - 繰入)</span></span>
+                            <span class="font-mono text-base md:text-lg font-bold" :class="(Number(totalTransferOut || 0) - Number(totalTransferIn || 0)) >= 0 ? 'text-gray-700' : 'text-orange-600'">
+                                ¥{{ Number((totalTransferOut || 0) - (totalTransferIn || 0)).toLocaleString() }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- 最終結果表示エリア -->
+                    <div class="flex flex-col gap-3 border-t-2 border-gray-300 pt-4">
+                        <!-- 当月収支 (A + C) -->
+                        <div class="flex justify-between items-center">
+                            <span class="font-bold text-gray-800 text-lg">当月収支 <span class="text-sm font-normal text-gray-500 ml-1">(A + C)</span></span>
+                            <span class="text-xl md:text-2xl font-bold font-mono" :class="currentMonthNet >= 0 ? 'text-blue-600' : 'text-red-600'">
+                                ¥{{ Number(currentMonthNet || 0).toLocaleString() }}
+                            </span>
+                        </div>
+                        <!-- 貯蓄への入金予定 (A + B + C) -->
+                        <div class="flex justify-between items-center bg-indigo-50 p-3 rounded-lg border border-indigo-100">
+                            <span class="font-bold text-indigo-900 text-lg">貯蓄への入金予定 <span class="text-sm font-normal text-indigo-500 ml-1">(A + B + C)</span></span>
+                            <span class="text-2xl md:text-3xl font-bold font-mono" :class="netSavingsToDeposit >= 0 ? 'text-indigo-700' : 'text-pink-600'">
+                                ¥{{ Number(netSavingsToDeposit || 0).toLocaleString() }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- アクションボタン -->
+            <div class="flex gap-4 mb-10">
+                <button v-if="!currentMonthData.isClosed" @click="closeMonth" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-4 rounded-lg shadow-lg transition-colors text-lg flex items-center justify-center gap-2">
+                    <span>🔒</span> この月の収支を確定する
+                </button>
+                <button v-if="currentMonthData.isClosed" @click="cancelCloseMonth" class="flex-1 bg-red-50 hover:bg-red-100 text-red-700 border-2 border-red-200 font-bold py-4 px-4 rounded-lg transition-colors text-lg flex items-center justify-center gap-2">
+                    <span>🔓</span> 確定をキャンセル
+                </button>
+            </div>
+
+            <!-- グラフ推移セクション -->
+            <div class="mt-8">
+                <div class="mb-4">
+                    <h2 class="text-2xl font-bold text-gray-800 flex items-center gap-2"><span>📊</span> グラフ推移</h2>
+                    <p class="text-sm text-gray-600 mt-1">各月の点や棒をタップすると詳細が表示されます。<br class="md:hidden">左右にスクロールして過去のデータを確認できます。</p>
+                </div>
+
+                <div class="bg-white p-4 md:p-6 rounded-lg shadow-sm border border-gray-200 relative">
+                    
+                    <!-- ツールチップ (カスタムDOM要素) -->
+                    <div id="custom-tooltip" class="text-sm text-gray-800">
+                        <h4 class="font-bold border-b pb-1 mb-2 text-indigo-700">📅 {{ activePopup.label }} の詳細</h4>
+                        <div class="grid grid-cols-2 gap-x-4 gap-y-1">
+                            <div class="text-gray-500">当月収支:</div><div class="text-right font-mono font-bold" :class="activePopup.net >= 0 ? 'text-blue-600' : 'text-red-600'">¥{{ Number(activePopup.net).toLocaleString() }}</div>
+                            <div class="text-gray-500">特別収入:</div><div class="text-right font-mono">¥{{ Number(activePopup.specialIn).toLocaleString() }}</div>
+                            <div class="text-gray-500">特別支出:</div><div class="text-right font-mono">¥{{ Number(activePopup.specialOut).toLocaleString() }}</div>
+                            <div class="col-span-2 border-t my-1"></div>
+                            <div class="text-gray-500">ステータス:</div><div class="text-right font-bold">{{ activePopup.isClosed ? '✅ 確定済み' : '⏳ 予測' }}</div>
+                            <div class="text-gray-500 mt-1">貯蓄口座:</div><div class="text-right font-mono mt-1">¥{{ Number(activePopup.savings).toLocaleString() }}</div>
+                            <div class="text-gray-500">年間積立:</div><div class="text-right font-mono">¥{{ Number(activePopup.annual).toLocaleString() }}</div>
+                            <div class="text-gray-500">旅行積立:</div><div class="text-right font-mono">¥{{ Number(activePopup.travel).toLocaleString() }}</div>
+                        </div>
+                    </div>
+
+                    <!-- 月別収支推移 (Bar Chart) -->
+                    <div class="mb-8 relative">
+                        <h3 class="font-bold text-gray-700 mb-2">月別収支推移 (当月収支)</h3>
+                        <div class="text-xs text-gray-500 mb-2 flex gap-4">
+                            <span class="flex items-center gap-1"><span class="w-3 h-3 bg-[rgba(54,162,235,0.7)] inline-block rounded"></span> 確定済み</span>
+                            <span class="flex items-center gap-1"><span class="w-3 h-3 bg-[rgba(54,162,235,0.2)] border border-[rgba(54,162,235,1)] inline-block rounded"></span> 予測 (未確定)</span>
+                        </div>
+                        <div class="overflow-x-auto pb-4 custom-scrollbar">
+                            <div class="min-w-[600px] h-64 relative">
+                                <canvas id="netChart"></canvas>
                             </div>
                         </div>
                     </div>
                     
-                    <!-- スクロールコンテナ2: 口座残高比較 -->
-                    <div>
-                        <h3 class="font-bold text-center mb-4 text-gray-700">各口座月別残高比較</h3>
-                        
-                        <!-- 左右分割レイアウト -->
-                        <div class="flex w-full relative">
-                            <!-- 左側: 固定Y軸エリア -->
-                            <div class="flex-none bg-white z-10" style="width: 60px; height: 280px;">
-                                <canvas id="accountChartY"></canvas>
-                            </div>
-                            <!-- 右側: スクロールデータエリア -->
-                            <div class="overflow-x-auto hide-scrollbar flex-1" ref="chartScrollContainer2">
-                                <div :style="{ width: chartWidth + 'px', minWidth: '100%', height: '280px' }">
-                                    <canvas id="accountChart"></canvas>
-                                </div>
+                    <hr class="my-6 border-gray-200">
+                    
+                    <!-- 各口座月別残高比較 (Line Chart) -->
+                    <div class="relative">
+                        <h3 class="font-bold text-gray-700 mb-4">各口座月別残高比較</h3>
+                        <div class="overflow-x-auto pb-4 custom-scrollbar">
+                            <div class="min-w-[600px] h-72 relative">
+                                <canvas id="balanceChart"></canvas>
                             </div>
                         </div>
                     </div>
@@ -380,64 +312,166 @@
             </div>
 
         </div>
+
+        <!-- 設定画面（マスタデータ管理） -->
+        <div v-show="currentMode === 'settings'" class="mt-4">
+            <div class="mb-6 bg-indigo-50 p-4 rounded-lg border border-indigo-100">
+                <h2 class="text-xl font-bold text-indigo-900 flex items-center gap-2"><span>⚙️</span> 「初期値（予算）」マスタ設定</h2>
+                <p class="text-sm text-indigo-700 mt-2">追加・変更した内容は、新しい月を開いた際に自動適用されます。</p>
+            </div>
+
+            <div class="bg-white p-4 md:p-6 rounded-lg shadow-sm">
+                
+                <!-- 収入マスタ -->
+                <div class="flex justify-between items-end mb-3 border-b-2 border-blue-200 pb-2">
+                    <h3 class="font-bold text-blue-700 flex items-center gap-2"><span>📥</span> 収入項目</h3>
+                    <button @click="addMasterItem('incomes')" class="text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-300 px-3 py-1.5 rounded shadow-sm font-bold transition-colors">＋ 追加</button>
+                </div>
+                <div class="space-y-3 mb-8">
+                    <div v-for="(item, index) in baseSettings.incomes" :key="'m-in'+index" class="flex items-center gap-2">
+                        <input v-model="item.name" class="w-[45%] border-gray-300 border rounded-md px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="項目名">
+                        <input v-model.number="item.amount" type="number" class="w-[45%] border-gray-300 border rounded-md px-3 py-2 text-right text-sm font-mono focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+                        <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
+                        <button @click="removeMasterItem('incomes', index)" class="w-[4%] text-gray-300 hover:text-red-500 font-bold text-xl text-center leading-none">&times;</button>
+                    </div>
+                </div>
+
+                <!-- 支出マスタ -->
+                <div class="flex justify-between items-end mb-3 border-b-2 border-red-200 pb-2">
+                    <h3 class="font-bold text-red-700 flex items-center gap-2"><span>📤</span> 支出項目</h3>
+                    <button @click="addMasterItem('expenses')" class="text-xs bg-red-50 hover:bg-red-100 text-red-700 border border-red-300 px-3 py-1.5 rounded shadow-sm font-bold transition-colors">＋ 追加</button>
+                </div>
+                <div class="space-y-3 mb-8">
+                    <div v-for="(item, index) in baseSettings.expenses" :key="'m-out'+index" class="flex items-center gap-2">
+                        <input v-model="item.name" class="w-[45%] border-gray-300 border rounded-md px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-red-500 outline-none transition-all" placeholder="項目名">
+                        <input v-model.number="item.amount" type="number" class="w-[45%] border-gray-300 border rounded-md px-3 py-2 text-right text-sm font-mono focus:bg-white focus:ring-2 focus:ring-red-500 outline-none transition-all">
+                        <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
+                        <button @click="removeMasterItem('expenses', index)" class="w-[4%] text-gray-300 hover:text-red-500 font-bold text-xl text-center leading-none">&times;</button>
+                    </div>
+                </div>
+
+                <!-- 特別収入マスタ -->
+                <div class="flex justify-between items-end mb-3 border-b-2 border-blue-100 pb-2">
+                    <h3 class="font-bold text-blue-500 flex items-center gap-2"><span>✨</span> 特別収入 (初期マスタ)</h3>
+                    <button @click="addMasterItem('specialIncomes')" class="text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 px-2 py-1 rounded shadow-sm font-bold transition-colors">＋ 追加</button>
+                </div>
+                <div class="space-y-3 mb-8">
+                    <div v-for="(item, index) in baseSettings.specialIncomes" :key="'m-spin'+index" class="flex items-center gap-2">
+                        <input v-model="item.name" class="w-[45%] border-gray-300 border rounded-md px-3 py-2 text-sm bg-blue-50 focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none transition-all" placeholder="項目名">
+                        <input v-model.number="item.amount" type="number" class="w-[45%] border-gray-300 border rounded-md px-3 py-2 text-right text-sm font-mono focus:bg-white focus:ring-2 focus:ring-blue-400 outline-none transition-all">
+                        <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
+                        <button @click="removeMasterItem('specialIncomes', index)" class="w-[4%] text-gray-300 hover:text-red-500 font-bold text-xl text-center leading-none">&times;</button>
+                    </div>
+                </div>
+
+                <!-- 特別支出マスタ -->
+                <div class="flex justify-between items-end mb-3 border-b-2 border-red-100 pb-2">
+                    <h3 class="font-bold text-red-500 flex items-center gap-2"><span>💥</span> 特別支出 (初期マスタ)</h3>
+                    <button @click="addMasterItem('specialExpenses')" class="text-xs bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-2 py-1 rounded shadow-sm font-bold transition-colors">＋ 追加</button>
+                </div>
+                <div class="space-y-3 mb-8">
+                    <div v-for="(item, index) in baseSettings.specialExpenses" :key="'m-spout'+index" class="flex items-center gap-2">
+                        <input v-model="item.name" class="w-[45%] border-gray-300 border rounded-md px-3 py-2 text-sm bg-red-50 focus:bg-white focus:ring-2 focus:ring-red-400 outline-none transition-all" placeholder="項目名">
+                        <input v-model.number="item.amount" type="number" class="w-[45%] border-gray-300 border rounded-md px-3 py-2 text-right text-sm font-mono focus:bg-white focus:ring-2 focus:ring-red-400 outline-none transition-all">
+                        <span class="text-gray-500 text-xs w-[6%] text-center">円</span>
+                        <button @click="removeMasterItem('specialExpenses', index)" class="w-[4%] text-gray-300 hover:text-red-500 font-bold text-xl text-center leading-none">&times;</button>
+                    </div>
+                </div>
+
+                <!-- 繰入マスタ -->
+                <div class="flex justify-between items-end mb-3 border-b-2 border-yellow-200 pb-2">
+                    <h3 class="font-bold text-yellow-700 flex items-center gap-2"><span>➡️</span> 繰入（積立などへ）</h3>
+                    <button @click="addMasterItem('transfersIn')" class="text-xs bg-yellow-50 hover:bg-yellow-100 text-yellow-800 border border-yellow-300 px-3 py-1.5 rounded shadow-sm font-bold transition-colors">＋ 追加</button>
+                </div>
+                <div class="space-y-3 mb-8">
+                    <div v-for="(item, index) in baseSettings.transfersIn" :key="'m-trin'+index" class="flex items-center gap-1.5 md:gap-2">
+                        <input v-model="item.name" class="w-[30%] md:w-[35%] border-gray-300 border rounded-md px-2 md:px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-yellow-500 outline-none transition-all" placeholder="項目名">
+                        <select v-model="item.target" class="w-[28%] md:w-[25%] border-gray-300 border rounded-md px-1 md:px-2 py-2 text-xs md:text-sm bg-gray-50 text-gray-700 focus:bg-white focus:ring-2 focus:ring-yellow-500 outline-none transition-all">
+                            <option value="annual">年間積立</option>
+                            <option value="travel">旅行積立</option>
+                            <option value="savings">貯蓄口座</option>
+                        </select>
+                        <input v-model.number="item.amount" type="number" class="w-[32%] md:w-[30%] border-gray-300 border rounded-md px-2 md:px-3 py-2 text-right text-sm font-mono focus:bg-white focus:ring-2 focus:ring-yellow-500 outline-none transition-all">
+                        <span class="text-gray-500 text-xs w-[6%] md:w-[6%] text-center">円</span>
+                        <button @click="removeMasterItem('transfersIn', index)" class="w-[4%] text-gray-300 hover:text-red-500 font-bold text-xl text-center leading-none">&times;</button>
+                    </div>
+                </div>
+
+                <!-- 引出しマスタ -->
+                <div class="flex justify-between items-end mb-3 border-b-2 border-purple-200 pb-2">
+                    <h3 class="font-bold text-purple-700 flex items-center gap-2"><span>⬅️</span> 引出し（積立などから）</h3>
+                    <button @click="addMasterItem('transfersOut')" class="text-xs bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-300 px-3 py-1.5 rounded shadow-sm font-bold transition-colors">＋ 追加</button>
+                </div>
+                <div class="space-y-3 mb-8">
+                    <div v-for="(item, index) in baseSettings.transfersOut" :key="'m-trout'+index" class="flex items-center gap-1.5 md:gap-2">
+                        <input v-model="item.name" class="w-[30%] md:w-[35%] border-gray-300 border rounded-md px-2 md:px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-purple-500 outline-none transition-all" placeholder="項目名">
+                        <select v-model="item.target" class="w-[28%] md:w-[25%] border-gray-300 border rounded-md px-1 md:px-2 py-2 text-xs md:text-sm bg-gray-50 text-gray-700 focus:bg-white focus:ring-2 focus:ring-purple-500 outline-none transition-all">
+                            <option value="annual">年間積立</option>
+                            <option value="travel">旅行積立</option>
+                            <option value="savings">貯蓄口座</option>
+                        </select>
+                        <input v-model.number="item.amount" type="number" class="w-[32%] md:w-[30%] border-gray-300 border rounded-md px-2 md:px-3 py-2 text-right text-sm font-mono focus:bg-white focus:ring-2 focus:ring-purple-500 outline-none transition-all">
+                        <span class="text-gray-500 text-xs w-[6%] md:w-[6%] text-center">円</span>
+                        <button @click="removeMasterItem('transfersOut', index)" class="w-[4%] text-gray-300 hover:text-red-500 font-bold text-xl text-center leading-none">&times;</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
+                <p class="font-bold mb-1">💡 既存の未確定月への適用について</p>
+                <p>マスタ設定を変更しても、すでに一度開いた（作成された）月には自動反映されません。<br>もし現在開いている月（未確定のみ）を最新のマスタ設定で上書きリセットしたい場合は、以下のボタンを押してください。</p>
+                <button @click="applyMasterToCurrentMonth" class="mt-3 bg-white border border-yellow-400 text-yellow-700 hover:bg-yellow-100 px-4 py-2 rounded shadow-sm font-bold transition-colors">
+                    現在の月をこのマスタでリセットする
+                </button>
+            </div>
+        </div>
+
     </div>
 
     <script>
-        const API_URL = 'https://script.google.com/macros/s/AKfycbwkX_aZKFRFAG5rCdV2fDmYxWL8km-QoJeYrSxKqdswPcIyd7VOOAIsWX-OLvsgSTxa/exec';
+        // --- エラー監視（ホワイトアウト対策） ---
+        window.addEventListener('error', function(event) {
+            document.getElementById('fatal-error').style.display = 'block';
+            document.getElementById('error-message').textContent = event.message + ' (' + event.filename + ':' + event.lineno + ')';
+        });
+
+        // GAS APIエンドポイント
+        const API_URL = 'https://script.google.com/macros/s/AKfycbyoLp0RJlzwZUGya4yY_Q32HtgXxt-m01Hf8tsfpwEUEuChrk9hmcycGBTZ4w2UFyVg/exec';
         const { createApp, ref, computed, watch, onMounted, nextTick } = Vue;
 
+        // デフォルトの初期値（クラウドにデータがない場合や欠損時のフォールバック用）
         const defaultData = {
             incomes: [
-                {name: '前月繰越', amount: 0}, {name: '給与', amount: 455000}, {name: 'えりな給与', amount: 30000}, {name: '子育て支援金', amount: 25000}
+                {name: '前月繰越', amount: 0},
+                {name: '給与', amount: 450000},
             ],
             expenses: [
-                {name: '管理費', amount: 33000}, {name: '住宅ローン', amount: 45681}, {name: 'コープ共済', amount: 2000}, {name: '軽ローン', amount: 18634},
-                {name: 'フリードローン', amount: 35671}, {name: '保育料', amount: 6000}, {name: '楽天カード', amount: 35000},
-                {name: 'リクルートカード', amount: 160000}, {name: 'ペイペイ', amount: 10000}, {name: '現金', amount: 20000},
-                {name: 'スーペイ', amount: 35000}, {name: '家具積立', amount: 20000}, {name: '教育積立', amount: 10000}
+                {name: '管理費', amount: 33000},
+                {name: '住宅ローン', amount: 45000},
             ],
             specialIncomes: [],
             specialExpenses: [],
             transfersIn: [
-                {name: '年間積立へ繰入', amount: 65000, target: 'annual'}, {name: '旅行積立へ繰入', amount: 0, target: 'travel'}
+                {name: '年間積立へ繰入', amount: 65000, target: 'annual'},
             ],
-            transfersOut: [
-                {name: '年間積立から引出', amount: 0, target: 'annual'}, {name: '旅行積立から引出', amount: 0, target: 'travel'}
-            ]
+            transfersOut: []
         };
 
-        const safeClone = (dataArray, defaultArray) => {
-            try {
-                if (!dataArray || !Array.isArray(dataArray) || dataArray.length === 0) {
-                    return JSON.parse(JSON.stringify(defaultArray || []));
-                }
-                return JSON.parse(JSON.stringify(dataArray));
-            } catch (e) {
-                return JSON.parse(JSON.stringify(defaultArray || []));
-            }
-        };
-
-        createApp({
+        const app = createApp({
             setup() {
                 const currentDate = ref(new Date());
+                const currentMode = ref('monthly'); // 'monthly' | 'settings'
                 const accounts = ref({ savings: 0, annual: 0, travel: 0 });
-                const monthsData = ref({});
                 const baseSettings = ref(JSON.parse(JSON.stringify(defaultData)));
-                const currentMode = ref('monthly');
+                const monthsData = ref({});
                 const isLoading = ref(true);
                 const isSaving = ref(false);
-                const activePopup = ref(null);
-                
-                const chartWidth = ref(0);
-                const chartScrollContainer1 = ref(null);
-                const chartScrollContainer2 = ref(null);
-
                 let saveTimeout = null;
-                // 分割されたグラフ用のインスタンス変数
+
+                // グラフ描画関連
+                let netChartInstance = null;
                 let balanceChartInstance = null;
-                let balanceChartYInstance = null;
-                let accountChartInstance = null;
-                let accountChartYInstance = null;
+                const activePopup = ref({ label: '', net: 0, specialIn: 0, specialOut: 0, isClosed: false, savings: 0, annual: 0, travel: 0 });
 
                 const currentMonthKey = computed(() => {
                     const y = currentDate.value.getFullYear();
@@ -449,30 +483,52 @@
                     return `${currentDate.value.getFullYear()}年 ${currentDate.value.getMonth() + 1}月`;
                 });
 
+                // 配列等の安全なクローン処理（未定義防止）
+                const safeClone = (sourceArray, defaultArray) => {
+                    if (!sourceArray || !Array.isArray(sourceArray)) {
+                        return JSON.parse(JSON.stringify(defaultArray || []));
+                    }
+                    return JSON.parse(JSON.stringify(sourceArray));
+                };
+
+                // 月データの取得と初期化（存在しない場合はbaseSettingsから生成）
                 const ensureMonthData = (key) => {
                     if (!monthsData.value[key]) {
                         monthsData.value[key] = {
                             isClosed: false,
                             incomes: safeClone(baseSettings.value.incomes, defaultData.incomes),
                             expenses: safeClone(baseSettings.value.expenses, defaultData.expenses),
-                            specialIncomes: safeClone(baseSettings.value.specialIncomes, defaultData.specialIncomes),
-                            specialExpenses: safeClone(baseSettings.value.specialExpenses, defaultData.specialExpenses),
+                            specialIncomes: safeClone(baseSettings.value.specialIncomes, []),
+                            specialExpenses: safeClone(baseSettings.value.specialExpenses, []),
                             transfersIn: safeClone(baseSettings.value.transfersIn, defaultData.transfersIn),
                             transfersOut: safeClone(baseSettings.value.transfersOut, defaultData.transfersOut)
                         };
+                    } else {
+                        // 既存月データの欠損プロパティ補完（マイグレーション）
+                        const m = monthsData.value[key];
+                        if (!m.incomes) m.incomes = safeClone(baseSettings.value.incomes, defaultData.incomes);
+                        if (!m.expenses) m.expenses = safeClone(baseSettings.value.expenses, defaultData.expenses);
+                        if (!m.specialIncomes) m.specialIncomes = safeClone(baseSettings.value.specialIncomes, []);
+                        if (!m.specialExpenses) m.specialExpenses = safeClone(baseSettings.value.specialExpenses, []);
+                        // 旧キー(transfers)からの移行処理含む
+                        if (!m.transfersIn) m.transfersIn = m.transfers ? m.transfers : safeClone(baseSettings.value.transfersIn, defaultData.transfersIn);
+                        if (!m.transfersOut) m.transfersOut = safeClone(baseSettings.value.transfersOut, defaultData.transfersOut);
                     }
+                    return monthsData.value[key];
                 };
 
                 const currentMonthData = computed(() => {
-                    if (isLoading.value) return {};
-                    return monthsData.value[currentMonthKey.value] || {};
+                    // ※ computed内での代入は行わず、参照のみを行う（ホワイトアウト対策）
+                    return monthsData.value[currentMonthKey.value] || {
+                        isClosed: false, incomes: [], expenses: [], specialIncomes: [], specialExpenses: [], transfersIn: [], transfersOut: []
+                    };
                 });
 
                 const loadData = async () => {
                     try {
                         const response = await fetch(API_URL);
                         const data = await response.json();
-
+                        
                         if (data && data.accounts) {
                             accounts.value = {
                                 savings: Number(data.accounts.savings) || 0,
@@ -480,177 +536,224 @@
                                 travel: Number(data.accounts.travel) || 0
                             };
                         }
-
+                        
                         if (data && data.baseSettings) {
                             baseSettings.value = {
                                 incomes: safeClone(data.baseSettings.incomes, defaultData.incomes),
                                 expenses: safeClone(data.baseSettings.expenses, defaultData.expenses),
-                                specialIncomes: safeClone(data.baseSettings.specialIncomes, defaultData.specialIncomes),
-                                specialExpenses: safeClone(data.baseSettings.specialExpenses, defaultData.specialExpenses),
+                                specialIncomes: safeClone(data.baseSettings.specialIncomes, []),
+                                specialExpenses: safeClone(data.baseSettings.specialExpenses, []),
                                 transfersIn: safeClone(data.baseSettings.transfersIn, defaultData.transfersIn),
                                 transfersOut: safeClone(data.baseSettings.transfersOut, defaultData.transfersOut)
                             };
                         }
 
                         if (data && data.monthsData) {
-                            Object.keys(data.monthsData).forEach(k => {
-                                const m = data.monthsData[k];
-                                m.incomes = safeClone(m.incomes, baseSettings.value.incomes);
-                                m.expenses = safeClone(m.expenses, baseSettings.value.expenses);
-                                m.specialIncomes = safeClone(m.specialIncomes, baseSettings.value.specialIncomes);
-                                m.specialExpenses = safeClone(m.specialExpenses, baseSettings.value.specialExpenses);
-                                const loadedTransfersIn = m.transfersIn || m.transfers;
-                                m.transfersIn = safeClone(loadedTransfersIn, baseSettings.value.transfersIn);
-                                m.transfersOut = safeClone(m.transfersOut, baseSettings.value.transfersOut);
-                            });
                             monthsData.value = data.monthsData;
+                            // 全ての月に対して欠損チェックとマイグレーションを実行
+                            Object.keys(monthsData.value).forEach(k => {
+                                ensureMonthData(k);
+                            });
                         }
+                        
+                        // 現在の月データが未作成の場合はここで作成
+                        if (!monthsData.value[currentMonthKey.value]) {
+                             ensureMonthData(currentMonthKey.value);
+                        }
+
                     } catch (e) {
-                        console.error("データロードエラー:", e);
+                        console.error("データの読み込みに失敗しました:", e);
+                        alert("データの読み込みに失敗しました。時間をおいて再読み込みしてください。");
                     } finally {
-                        ensureMonthData(currentMonthKey.value);
                         isLoading.value = false;
+                        nextTick(() => {
+                            drawCharts();
+                        });
                     }
                 };
 
                 const saveData = async () => {
                     isSaving.value = true;
                     try {
+                        const payload = {
+                            accounts: accounts.value,
+                            baseSettings: baseSettings.value,
+                            monthsData: monthsData.value
+                        };
+                        
                         await fetch(API_URL, {
                             method: 'POST',
                             headers: { 'Content-Type': 'text/plain' },
-                            body: JSON.stringify({ 
-                                accounts: accounts.value, 
-                                monthsData: monthsData.value,
-                                baseSettings: baseSettings.value 
-                            })
+                            body: JSON.stringify(payload)
                         });
                     } catch (e) {
-                        console.error("データ保存エラー:", e);
+                        console.error("保存エラー:", e);
+                        alert("クラウドへの保存に失敗しました。通信環境を確認してください。");
                     } finally {
                         isSaving.value = false;
                     }
                 };
 
+                // データ変更の監視とオートセーブ（デバウンス1.5秒）
                 watch([monthsData, accounts, baseSettings], () => {
                     if (isLoading.value) return;
                     clearTimeout(saveTimeout);
                     isSaving.value = true;
-                    saveTimeout = setTimeout(saveData, 1500);
+                    saveTimeout = setTimeout(() => {
+                        saveData();
+                        nextTick(() => { drawCharts(); }); // データ変更時にグラフも再描画
+                    }, 1500);
                 }, { deep: true });
 
-                watch(currentMonthKey, (newKey) => {
-                    if (!isLoading.value) ensureMonthData(newKey);
-                });
-
-                watch(currentMode, async (newMode) => {
-                    activePopup.value = null;
-                    if (newMode === 'chart') {
-                        await nextTick();
-                        drawCharts();
-                    }
-                });
-
-                const handleBodyClick = () => {
-                    if (activePopup.value) {
-                        activePopup.value = null;
-                    }
-                };
-
-                const safeSum = (arr) => (Array.isArray(arr) ? arr : []).reduce((s, i) => s + (Number(i.amount) || 0), 0);
-
-                const totalIncome = computed(() => safeSum(currentMonthData.value.incomes));
-                const totalExpense = computed(() => safeSum(currentMonthData.value.expenses));
-                const totalSpecialIncome = computed(() => safeSum(currentMonthData.value.specialIncomes));
-                const totalSpecialExpense = computed(() => safeSum(currentMonthData.value.specialExpenses));
-                const totalTransferIn = computed(() => safeSum(currentMonthData.value.transfersIn));
-                const totalTransferOut = computed(() => safeSum(currentMonthData.value.transfersOut));
-
+                // UI表示用の計算プロパティ（NaN防止処理適用済み）
+                const totalIncome = computed(() => (currentMonthData.value.incomes || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
+                const totalExpense = computed(() => (currentMonthData.value.expenses || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
+                const totalSpecialIncome = computed(() => (currentMonthData.value.specialIncomes || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
+                const totalSpecialExpense = computed(() => (currentMonthData.value.specialExpenses || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
+                const totalTransferIn = computed(() => (currentMonthData.value.transfersIn || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
+                const totalTransferOut = computed(() => (currentMonthData.value.transfersOut || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
+                
+                // 当月収支 (A + C) = 収入 - 支出 - 繰入 + 引出
                 const currentMonthNet = computed(() => totalIncome.value - totalExpense.value - totalTransferIn.value + totalTransferOut.value);
+
+                // 貯蓄への入金予定 (A + B + C) = 当月収支 + 特別収支
+                const netSavingsToDeposit = computed(() => {
+                    const specialNet = (Number(totalSpecialIncome.value) || 0) - (Number(totalSpecialExpense.value) || 0);
+                    return (Number(currentMonthNet.value) || 0) + specialNet;
+                });
 
                 const changeMonth = (d) => {
                     const nd = new Date(currentDate.value);
                     nd.setMonth(nd.getMonth() + d);
                     currentDate.value = nd;
+                    
+                    // 移動先の月が存在しない場合は作成
+                    const nextKey = `${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}`;
+                    if (!monthsData.value[nextKey]) {
+                        ensureMonthData(nextKey);
+                    }
+                    
+                    nextTick(() => {
+                        drawCharts(); // 月移動時もグラフを再描画（現在月のハイライト用）
+                    });
                 };
 
-                const addItem = (list, type) => {
-                    if (!list) return;
-                    if (type === 'transfer') {
-                        list.push({ name: '新規項目', amount: 0, target: 'annual' });
+                // トランザクション追加
+                const addItem = (type) => {
+                    const list = currentMonthData.value[type];
+                    if (type.startsWith('transfers')) {
+                        list.push({ name: '', amount: 0, target: 'annual' });
                     } else {
-                        list.push({ name: '新規項目', amount: 0 });
+                        list.push({ name: '', amount: 0 });
                     }
                 };
 
-                const removeItem = (list, index) => {
-                    list.splice(index, 1);
+                const removeItem = (type, index) => {
+                    currentMonthData.value[type].splice(index, 1);
                 };
 
-                const applySettingsAndClose = () => {
-                    if (confirm('マスタの変更を保存し、すでに開いている「未確定の月」のデータもこのマスタで一括上書きしますか？')) {
-                        Object.keys(monthsData.value).forEach(key => {
-                            if (!monthsData.value[key].isClosed) {
-                                monthsData.value[key].incomes = safeClone(baseSettings.value.incomes, defaultData.incomes);
-                                monthsData.value[key].expenses = safeClone(baseSettings.value.expenses, defaultData.expenses);
-                                monthsData.value[key].specialIncomes = safeClone(baseSettings.value.specialIncomes, defaultData.specialIncomes);
-                                monthsData.value[key].specialExpenses = safeClone(baseSettings.value.specialExpenses, defaultData.specialExpenses);
-                                monthsData.value[key].transfersIn = safeClone(baseSettings.value.transfersIn, defaultData.transfersIn);
-                                monthsData.value[key].transfersOut = safeClone(baseSettings.value.transfersOut, defaultData.transfersOut);
-                            }
-                        });
-                        currentMode.value = 'monthly';
+                // マスタデータ管理用メソッド
+                const addMasterItem = (type) => {
+                    const list = baseSettings.value[type];
+                    if (type.startsWith('transfers')) {
+                        list.push({ name: '', amount: 0, target: 'annual' });
+                    } else {
+                        list.push({ name: '', amount: 0 });
                     }
                 };
 
-                const justSaveAndClose = () => {
-                    currentMode.value = 'monthly';
+                const removeMasterItem = (type, index) => {
+                    baseSettings.value[type].splice(index, 1);
                 };
 
+                const applyMasterToCurrentMonth = () => {
+                    if (currentMonthData.value.isClosed) {
+                        alert("この月はすでに確定されているため、マスタの適用はできません。");
+                        return;
+                    }
+                    if (confirm(`${currentMonthStr.value} のデータを現在のマスタ設定で上書きリセットしますか？\n（入力済みのデータは失われます）`)) {
+                        monthsData.value[currentMonthKey.value] = {
+                            isClosed: false,
+                            incomes: safeClone(baseSettings.value.incomes, []),
+                            expenses: safeClone(baseSettings.value.expenses, []),
+                            specialIncomes: safeClone(baseSettings.value.specialIncomes, []),
+                            specialExpenses: safeClone(baseSettings.value.specialExpenses, []),
+                            transfersIn: safeClone(baseSettings.value.transfersIn, []),
+                            transfersOut: safeClone(baseSettings.value.transfersOut, [])
+                        };
+                    }
+                };
+
+                // 月次確定処理
                 const closeMonth = () => {
                     if (currentMonthData.value.isClosed) return;
+                    
+                    const depositAmount = netSavingsToDeposit.value;
+                    const message = depositAmount >= 0 
+                        ? `${currentMonthStr.value}の収支を確定しますか？\n最終結果 ¥${depositAmount.toLocaleString()} が貯蓄口座に加算されます。`
+                        : `${currentMonthStr.value}の収支を確定しますか？\n最終結果 ¥${depositAmount.toLocaleString()} が貯蓄口座から減算されます。`;
 
-                    const msg = `${currentMonthStr.value}の収支を確定しますか？\n`
-                              + `当月残高の¥${Number(currentMonthNet.value || 0).toLocaleString()}が貯蓄口座に入金され、\n`
-                              + `特別収入/支出が貯蓄口座に反映されます。`;
-
-                    if (confirm(msg)) {
+                    if (confirm(message)) {
+                        // 1. 各種積立（振替先）口座への加算・減算処理
                         (currentMonthData.value.transfersIn || []).forEach(t => {
                             if (accounts.value[t.target] !== undefined) accounts.value[t.target] += (Number(t.amount) || 0);
                         });
                         (currentMonthData.value.transfersOut || []).forEach(t => {
                             if (accounts.value[t.target] !== undefined) accounts.value[t.target] -= (Number(t.amount) || 0);
                         });
-
-                        // 貯蓄口座 = 当月残高 + 特別収入 - 特別支出
-                        accounts.value.savings += (currentMonthNet.value + totalSpecialIncome.value - totalSpecialExpense.value);
+                        
+                        // 2. 貯蓄口座への反映 (A+B+C)
+                        accounts.value.savings += depositAmount;
+                        
+                        // 3. 確定時点の口座残高スナップショットを保存（グラフ描画用）
+                        currentMonthData.value.accountsSnapshot = {
+                            savings: accounts.value.savings,
+                            annual: accounts.value.annual,
+                            travel: accounts.value.travel
+                        };
 
                         currentMonthData.value.isClosed = true;
+                        
+                        // saveData() は watch が検知して自動発火するが、UIロックの即時性のために明示的に呼んでもよい
                         saveData();
+                        nextTick(() => { drawCharts(); });
                     }
                 };
 
+                // 月次確定キャンセル（ロールバック処理）
                 const cancelCloseMonth = () => {
                     if (!currentMonthData.value.isClosed) return;
-
-                    if (confirm('確定をキャンセルして再編集可能にしますか？\n（入力した金額は消えずにそのまま保持されます）')) {
+                    if (confirm('確定をキャンセルして再編集可能にしますか？\n各口座の残高は確定前の状態に戻ります。')) {
+                        
+                        // 1. 振替処理の逆算（ロールバック）
                         (currentMonthData.value.transfersIn || []).forEach(t => {
                             if (accounts.value[t.target] !== undefined) accounts.value[t.target] -= (Number(t.amount) || 0);
                         });
                         (currentMonthData.value.transfersOut || []).forEach(t => {
                             if (accounts.value[t.target] !== undefined) accounts.value[t.target] += (Number(t.amount) || 0);
                         });
-
-                        // 貯蓄口座のロールバック (確定時に足したものを引く)
-                        accounts.value.savings -= (currentMonthNet.value + totalSpecialIncome.value - totalSpecialExpense.value);
+                        
+                        // 2. 貯蓄口座の逆算（ロールバック）
+                        accounts.value.savings -= netSavingsToDeposit.value;
+                        
+                        // スナップショットのクリア
+                        delete currentMonthData.value.accountsSnapshot;
 
                         currentMonthData.value.isClosed = false;
+                        
                         saveData();
+                        nextTick(() => { drawCharts(); });
                     }
                 };
 
+                // データのエクスポート・インポート
                 const exportData = () => {
-                    const blob = new Blob([JSON.stringify({ accounts: accounts.value, monthsData: monthsData.value, baseSettings: baseSettings.value }, null, 2)], { type: 'application/json' });
+                    const payload = {
+                        accounts: accounts.value,
+                        baseSettings: baseSettings.value,
+                        monthsData: monthsData.value
+                    };
+                    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
@@ -659,318 +762,253 @@
                     URL.revokeObjectURL(url);
                 };
 
-                const drawCharts = () => {
-                    const sortedKeys = Object.keys(monthsData.value).sort();
-                    if (sortedKeys.length === 0) return;
+                const importData = (event) => {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const data = JSON.parse(e.target.result);
+                            if (data.accounts && data.monthsData) {
+                                accounts.value = data.accounts;
+                                if (data.baseSettings) {
+                                    baseSettings.value = data.baseSettings;
+                                }
+                                monthsData.value = data.monthsData;
+                                alert("データの復元が完了しました。");
+                                // 復元後、全データのマイグレーションチェック
+                                Object.keys(monthsData.value).forEach(k => { ensureMonthData(k); });
+                                nextTick(() => { drawCharts(); });
+                            } else {
+                                alert("無効なファイル形式です。");
+                            }
+                        } catch (err) {
+                            alert("ファイルの読み込みに失敗しました。");
+                        }
+                    };
+                    reader.readAsText(file);
+                    event.target.value = ''; // 連続で同じファイルを読み込めるようにリセット
+                };
 
-                    const dataCount = sortedKeys.length;
+                // --- グラフ描画ロジック ---
+                const drawCharts = () => {
+                    if (currentMode.value !== 'monthly') return; // ダッシュボードモードでのみ描画
+
+                    const netCtx = document.getElementById('netChart');
+                    const balanceCtx = document.getElementById('balanceChart');
                     
-                    // フォールバック付きで安全に画面幅を取得
-                    const winWidth = typeof window !== 'undefined' ? window.innerWidth : 375;
-                    const containerBaseWidth = winWidth > 768 ? 700 - 60 : winWidth - 32 - 60;
-                    const minWidthPerItem = containerBaseWidth / 6; 
-                    chartWidth.value = Math.max(containerBaseWidth, dataCount * minWidthPerItem);
+                    if (!netCtx || !balanceCtx) return;
+
+                    // データの準備（過去12ヶ月分などを抽出してソート）
+                    const keys = Object.keys(monthsData.value).sort();
+                    if (keys.length === 0) return;
+
+                    // 最新から12ヶ月分に絞る場合
+                    const recentKeys = keys.slice(-12);
 
                     const labels = [];
                     const netData = [];
+                    const bgColors = [];
+                    const borderColors = [];
+                    
                     const savingsData = [];
                     const annualData = [];
                     const travelData = [];
-                    const savingsBg = [];
-                    const annualBg = [];
-                    const travelBg = [];
-                    const netPointColors = [];
-                    const popupDetails = {};
 
-                    // 現在の口座残高をベースに、過去から現在への口座残高を正確に逆算して復元
-                    let runningSavings = Number(accounts.value.savings) || 0;
-                    let runningAnnual = Number(accounts.value.annual) || 0;
-                    let runningTravel = Number(accounts.value.travel) || 0;
+                    // ツールチップ用の生データを保持する配列
+                    const rawDataArray = [];
 
-                    // まず全月の収支を集計して逆算の起点を求める
-                    const monthCalculations = {};
-                    sortedKeys.forEach(key => {
-                        const m = monthsData.value[key];
-                        let net = 0;
-                        let spIn = 0, spOut = 0;
-                        let trinAnnual = 0, troutAnnual = 0;
-                        let trinTravel = 0, troutTravel = 0;
+                    recentKeys.forEach(k => {
+                        labels.push(k.replace('-', '/'));
+                        const m = monthsData.value[k];
+                        
+                        // 計算ロジックを再適用
+                        const inc = (m.incomes || []).reduce((s, i) => s + (Number(i.amount)||0), 0);
+                        const exp = (m.expenses || []).reduce((s, i) => s + (Number(i.amount)||0), 0);
+                        const spInc = (m.specialIncomes || []).reduce((s, i) => s + (Number(i.amount)||0), 0);
+                        const spExp = (m.specialExpenses || []).reduce((s, i) => s + (Number(i.amount)||0), 0);
+                        const trIn = (m.transfersIn || []).reduce((s, i) => s + (Number(i.amount)||0), 0);
+                        const trOut = (m.transfersOut || []).reduce((s, i) => s + (Number(i.amount)||0), 0);
+                        
+                        // 当月収支 (A + C)
+                        const net = inc - exp - trIn + trOut;
+                        netData.push(net);
 
-                        if (m.incomes && m.expenses && m.transfersIn && m.transfersOut) {
-                            net = safeSum(m.incomes) - safeSum(m.expenses) - safeSum(m.transfersIn) + safeSum(m.transfersOut);
-                            spIn = safeSum(m.specialIncomes);
-                            spOut = safeSum(m.specialExpenses);
+                        // カスタムツールチップ用に保持
+                        rawDataArray.push({
+                            label: k,
+                            net: net,
+                            specialIn: spInc,
+                            specialOut: spExp,
+                            isClosed: m.isClosed,
+                            savings: m.accountsSnapshot ? m.accountsSnapshot.savings : accounts.value.savings, // 未確定月は現在のリアルタイム値を仮表示
+                            annual: m.accountsSnapshot ? m.accountsSnapshot.annual : accounts.value.annual,
+                            travel: m.accountsSnapshot ? m.accountsSnapshot.travel : accounts.value.travel
+                        });
 
-                            (m.transfersIn || []).forEach(t => {
-                                if (t.target === 'annual') trinAnnual += Number(t.amount) || 0;
-                                if (t.target === 'travel') trinTravel += Number(t.amount) || 0;
-                            });
-                            (m.transfersOut || []).forEach(t => {
-                                if (t.target === 'annual') troutAnnual += Number(t.amount) || 0;
-                                if (t.target === 'travel') troutTravel += Number(t.amount) || 0;
-                            });
-                        }
-                        monthCalculations[key] = { net, spIn, spOut, trinAnnual, troutAnnual, trinTravel, troutTravel };
-
-                        if (m.isClosed) {
-                            runningSavings -= (net + spIn - spOut);
-                            runningAnnual -= (trinAnnual - troutAnnual);
-                            runningTravel -= (trinTravel - troutTravel);
-                        }
-                    });
-
-                    // 順方向へシミュレーション・復元
-                    let simSavings = runningSavings;
-                    let simAnnual = runningAnnual;
-                    let simTravel = runningTravel;
-
-                    sortedKeys.forEach(key => {
-                        const m = monthsData.value[key];
-                        labels.push(key);
-                        const calc = monthCalculations[key];
-                        netData.push(calc.net);
-
-                        simSavings += (calc.net + calc.spIn - calc.spOut);
-                        simAnnual += (calc.trinAnnual - calc.troutAnnual);
-                        simTravel += (calc.trinTravel - calc.troutTravel);
-
-                        savingsData.push(simSavings);
-                        annualData.push(simAnnual);
-                        travelData.push(simTravel);
-
-                        if (m.isClosed) {
-                            savingsBg.push('rgba(75, 192, 192, 0.8)');
-                            annualBg.push('rgba(255, 206, 86, 0.8)');
-                            travelBg.push('rgba(153, 102, 255, 0.8)');
-                            netPointColors.push('rgba(54, 162, 235, 1)'); 
+                        // 確定状態と現在表示中の月で色を変える
+                        if (k === currentMonthKey.value) {
+                            bgColors.push(m.isClosed ? 'rgba(255, 99, 132, 0.8)' : 'rgba(255, 99, 132, 0.4)');
+                            borderColors.push('rgb(255, 99, 132)');
                         } else {
-                            savingsBg.push('rgba(75, 192, 192, 0.3)');
-                            annualBg.push('rgba(255, 206, 86, 0.3)');
-                            travelBg.push('rgba(153, 102, 255, 0.3)');
-                            netPointColors.push('rgba(255, 159, 64, 1)'); 
+                            bgColors.push(m.isClosed ? 'rgba(54, 162, 235, 0.7)' : 'rgba(54, 162, 235, 0.2)');
+                            borderColors.push('rgb(54, 162, 235)');
                         }
 
-                        popupDetails[key] = {
-                            label: key,
-                            net: calc.net,
-                            specialIn: calc.spIn,
-                            specialOut: calc.spOut,
-                            savings: simSavings,
-                            annual: simAnnual,
-                            travel: simTravel,
-                            isClosed: m.isClosed
-                        };
+                        // スナップショットがあればそれを、なければ0(または直前の値)をプロット
+                        savingsData.push(m.accountsSnapshot ? m.accountsSnapshot.savings : null);
+                        annualData.push(m.accountsSnapshot ? m.accountsSnapshot.annual : null);
+                        travelData.push(m.accountsSnapshot ? m.accountsSnapshot.travel : null);
                     });
 
-                    const handleChartClick = (event, elements) => {
-                        if (elements && elements.length > 0) {
-                            const index = elements[0].index;
-                            const clickedKey = labels[index];
-                            if (popupDetails[clickedKey]) {
-                                activePopup.value = popupDetails[clickedKey];
+                    // カスタムツールチップハンドラ
+                    const externalTooltipHandler = (context) => {
+                        const {chart, tooltip} = context;
+                        const tooltipEl = document.getElementById('custom-tooltip');
+
+                        if (tooltip.opacity === 0) {
+                            tooltipEl.style.opacity = 0;
+                            return;
+                        }
+
+                        // 選択されたデータインデックスを取得し、Vueのリアクティブデータに流し込む
+                        if (tooltip.body) {
+                            const dataIndex = tooltip.dataPoints[0].dataIndex;
+                            const data = rawDataArray[dataIndex];
+                            activePopup.value = data;
+                        }
+
+                        const {offsetLeft: positionX, offsetTop: positionY} = chart.canvas;
+                        tooltipEl.style.opacity = 1;
+                        
+                        // スマホ等で画面外にはみ出ないように位置調整
+                        let leftPos = positionX + tooltip.caretX + 10;
+                        if (leftPos + tooltipEl.offsetWidth > window.innerWidth - 20) {
+                            leftPos = positionX + tooltip.caretX - tooltipEl.offsetWidth - 10;
+                        }
+                        
+                        tooltipEl.style.left = leftPos + 'px';
+                        tooltipEl.style.top = positionY + tooltip.caretY + 'px';
+                    };
+
+                    const commonOptions = {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false,
+                        },
+                        plugins: {
+                            tooltip: {
+                                enabled: false, // デフォルトツールチップを無効化
+                                external: externalTooltipHandler
                             }
                         }
                     };
 
-                    const yAxisFormatter = function(value) {
-                        if (Math.abs(value) >= 10000) {
-                            return (value / 10000) + '万';
-                        }
-                        return value;
-                    };
-
-                    // -----------------------------------------------------------------
-                    // 1. 月別収支 (balanceChart) - Y軸専用 (左側固定)
-                    // -----------------------------------------------------------------
-                    const ctxBalanceY = document.getElementById('balanceChartY');
-                    if (ctxBalanceY) {
-                        if (balanceChartYInstance) balanceChartYInstance.destroy();
-                        balanceChartYInstance = new Chart(ctxBalanceY, {
-                            type: 'line',
-                            data: {
-                                labels: labels,
-                                datasets: [{
-                                    data: netData,
-                                    borderColor: 'transparent',
-                                    backgroundColor: 'transparent',
-                                    pointRadius: 0
-                                }]
+                    // 1. 月別収支推移チャートの描画
+                    if (netChartInstance) netChartInstance.destroy();
+                    netChartInstance = new Chart(netCtx, {
+                        type: 'bar',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: '当月収支',
+                                data: netData,
+                                backgroundColor: bgColors,
+                                borderColor: borderColors,
+                                borderWidth: 1,
+                                borderRadius: 4
+                            }]
+                        },
+                        options: {
+                            ...commonOptions,
+                            plugins: {
+                                ...commonOptions.plugins,
+                                legend: { display: false }
                             },
-                            options: {
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                animation: false,
-                                plugins: {
-                                    legend: { display: false },
-                                    tooltip: { enabled: false }
-                                },
-                                scales: {
-                                    x: {
-                                        display: true, 
-                                        ticks: { color: 'transparent' },
-                                        grid: { display: false, drawBorder: false },
-                                        border: { display: false }
-                                    },
-                                    y: {
-                                        beginAtZero: true,
-                                        ticks: { callback: yAxisFormatter },
-                                        // 【安全策】scaleが存在する場合のみ幅を固定
-                                        afterFit: (scale) => { if (scale) scale.width = 60; } 
-                                    }
+                            scales: {
+                                y: {
+                                    grid: { color: 'rgba(0,0,0,0.05)' }
                                 }
                             }
-                        });
-                    }
+                        }
+                    });
 
-                    // -----------------------------------------------------------------
-                    // 2. 月別収支 (balanceChart) - スクロールデータ専用 (右側)
-                    // -----------------------------------------------------------------
-                    const ctxBalance = document.getElementById('balanceChart');
-                    if (ctxBalance) {
-                        if (balanceChartInstance) balanceChartInstance.destroy();
-                        balanceChartInstance = new Chart(ctxBalance, {
-                            type: 'line',
-                            data: {
-                                labels: labels,
-                                datasets: [{
-                                    label: '月別収支 (¥)',
-                                    data: netData,
-                                    borderColor: 'rgba(54, 162, 235, 0.5)',
-                                    backgroundColor: 'rgba(54, 162, 235, 0.1)',
-                                    pointBackgroundColor: netPointColors,
-                                    pointBorderColor: netPointColors,
-                                    pointRadius: 7,
-                                    pointHoverRadius: 9,
-                                    hitRadius: 20,
-                                    fill: true,
-                                    tension: 0.1
-                                }]
+                    // 2. 口座残高チャートの描画
+                    if (balanceChartInstance) balanceChartInstance.destroy();
+                    balanceChartInstance = new Chart(balanceCtx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [
+                                {
+                                    label: '貯蓄口座',
+                                    data: savingsData,
+                                    borderColor: 'rgb(34, 197, 94)',
+                                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                                    borderWidth: 2,
+                                    tension: 0.3,
+                                    spanGaps: true
+                                },
+                                {
+                                    label: '年間積立',
+                                    data: annualData,
+                                    borderColor: 'rgb(234, 179, 8)',
+                                    backgroundColor: 'rgba(234, 179, 8, 0.1)',
+                                    borderWidth: 2,
+                                    tension: 0.3,
+                                    spanGaps: true
+                                },
+                                {
+                                    label: '旅行積立',
+                                    data: travelData,
+                                    borderColor: 'rgb(168, 85, 247)',
+                                    backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                                    borderWidth: 2,
+                                    tension: 0.3,
+                                    spanGaps: true
+                                }
+                            ]
+                        },
+                        options: {
+                            ...commonOptions,
+                            plugins: {
+                                ...commonOptions.plugins,
+                                legend: { position: 'bottom' }
                             },
-                            options: {
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                plugins: {
-                                    legend: { display: false }
-                                },
-                                scales: {
-                                    x: { display: true },
-                                    y: {
-                                        // 【修正】強制幅0(scale.width=0)をやめ、安全に軸自体を非表示にする
-                                        display: false,
-                                        beginAtZero: true
-                                    }
-                                },
-                                onClick: handleChartClick
-                            }
-                        });
-                    }
-
-                    // -----------------------------------------------------------------
-                    // 3. 口座残高 (accountChart) - Y軸専用 (左側固定)
-                    // -----------------------------------------------------------------
-                    const ctxAccountY = document.getElementById('accountChartY');
-                    if (ctxAccountY) {
-                        if (accountChartYInstance) accountChartYInstance.destroy();
-                        accountChartYInstance = new Chart(ctxAccountY, {
-                            type: 'bar',
-                            data: {
-                                labels: labels,
-                                datasets: [
-                                    { data: savingsData, backgroundColor: 'transparent', borderColor: 'transparent' },
-                                    { data: annualData, backgroundColor: 'transparent', borderColor: 'transparent' },
-                                    { data: travelData, backgroundColor: 'transparent', borderColor: 'transparent' }
-                                ]
-                            },
-                            options: {
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                animation: false,
-                                plugins: {
-                                    legend: { 
-                                        display: true, 
-                                        labels: { color: 'transparent', boxWidth: 0, padding: 10 },
-                                        onClick: () => {} 
-                                    },
-                                    tooltip: { enabled: false }
-                                },
-                                scales: {
-                                    x: {
-                                        display: true,
-                                        ticks: { color: 'transparent' },
-                                        grid: { display: false, drawBorder: false },
-                                        border: { display: false }
-                                    },
-                                    y: {
-                                        beginAtZero: true,
-                                        ticks: { callback: yAxisFormatter },
-                                        // 【安全策】
-                                        afterFit: (scale) => { if (scale) scale.width = 60; }
-                                    }
+                            scales: {
+                                y: {
+                                    grid: { color: 'rgba(0,0,0,0.05)' },
+                                    beginAtZero: true
                                 }
                             }
-                        });
-                    }
-
-                    // -----------------------------------------------------------------
-                    // 4. 口座残高 (accountChart) - スクロールデータ専用 (右側)
-                    // -----------------------------------------------------------------
-                    const ctxAccount = document.getElementById('accountChart');
-                    if (ctxAccount) {
-                        if (accountChartInstance) accountChartInstance.destroy();
-                        accountChartInstance = new Chart(ctxAccount, {
-                            type: 'bar',
-                            data: {
-                                labels: labels,
-                                datasets: [
-                                    { label: '貯蓄口座', data: savingsData, backgroundColor: savingsBg, borderWidth: 1 },
-                                    { label: '年間積立', data: annualData, backgroundColor: annualBg, borderWidth: 1 },
-                                    { label: '旅行積立', data: travelData, backgroundColor: travelBg, borderWidth: 1 }
-                                ]
-                            },
-                            options: {
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                plugins: {
-                                    legend: { 
-                                        display: true,
-                                        onClick: () => {} 
-                                    }
-                                },
-                                scales: {
-                                    x: { display: true },
-                                    y: {
-                                        // 【修正】強制幅0をやめ、安全に軸自体を非表示にする
-                                        display: false,
-                                        beginAtZero: true
-                                    }
-                                },
-                                onClick: handleChartClick
-                            }
-                        });
-                    }
-
-                    // 描画後、右端（最新月）へ自動スクロールする処理
-                    setTimeout(() => {
-                        if (chartScrollContainer1.value) {
-                            chartScrollContainer1.value.scrollLeft = chartScrollContainer1.value.scrollWidth;
                         }
-                        if (chartScrollContainer2.value) {
-                            chartScrollContainer2.value.scrollLeft = chartScrollContainer2.value.scrollWidth;
-                        }
-                    }, 100);
+                    });
+                };
+
+                // 初期化処理フック
+                app.config.errorHandler = (err, vm, info) => {
+                    console.error("Vue Error:", err, info);
+                    document.getElementById('fatal-error').style.display = 'block';
+                    document.getElementById('error-message').textContent = `Vue Error: ${err.message}`;
                 };
 
                 onMounted(loadData);
 
                 return {
-                    currentMonthStr, currentMonthData, baseSettings, accounts, currentMode,
-                    isLoading, isSaving, activePopup, handleBodyClick,
-                    totalIncome, totalExpense, totalSpecialIncome, totalSpecialExpense, totalTransferIn, totalTransferOut, currentMonthNet,
-                    changeMonth, closeMonth, cancelCloseMonth, exportData, addItem, removeItem, applySettingsAndClose, justSaveAndClose,
-                    chartWidth, chartScrollContainer1, chartScrollContainer2
+                    currentMode, currentMonthStr, currentMonthData, accounts, baseSettings, isLoading, isSaving,
+                    totalIncome, totalExpense, totalSpecialIncome, totalSpecialExpense, totalTransferIn, totalTransferOut, 
+                    currentMonthNet, netSavingsToDeposit,
+                    changeMonth, closeMonth, cancelCloseMonth, exportData, importData, 
+                    addItem, removeItem, addMasterItem, removeMasterItem, applyMasterToCurrentMonth,
+                    activePopup
                 };
             }
-        }).mount('#app');
+        });
+        
+        app.mount('#app');
     </script>
 </body>
 </html>
+```
