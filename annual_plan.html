@@ -24,7 +24,6 @@
     </script>
 
     <div id="app" v-cloak class="max-w-3xl mx-auto p-4 pb-20">
-        <!-- ローディング画面 -->
         <div v-if="isLoading" class="fixed inset-0 bg-white bg-opacity-90 flex items-center justify-center z-50">
             <div class="text-xl font-bold text-blue-600">クラウドから年間計画を読み込み中...</div>
         </div>
@@ -42,7 +41,6 @@
         </header>
 
         <div v-if="!isLoading">
-            <!-- サマリーパネル -->
             <section class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
                 <div class="bg-white p-6 rounded-lg shadow-md border-t-4 border-red-500">
                     <div class="text-sm text-gray-500 mb-2 font-bold">年間予定支出 合計</div>
@@ -55,7 +53,6 @@
                 </div>
             </section>
 
-            <!-- 年間支出スケジュール -->
             <div class="bg-white rounded-lg shadow-sm mb-6 p-4">
                 <div class="flex justify-between items-center mb-4 border-b-2 border-yellow-200 pb-2">
                     <h2 class="text-lg font-bold text-gray-700">支出イベントスケジュール</h2>
@@ -69,26 +66,18 @@
                 </div>
 
                 <div class="space-y-3">
-                    <div v-for="(item, index) in sortedAnnualItems" :key="item.id" class="flex flex-wrap md:flex-nowrap items-center gap-2 p-3 bg-gray-50 rounded border border-gray-200">
-                        
-                        <!-- 月選択 -->
+                    <div v-for="item in sortedAnnualItems" :key="item.id" class="flex flex-wrap md:flex-nowrap items-center gap-2 p-3 bg-gray-50 rounded border border-gray-200">
                         <div class="flex items-center gap-1 w-full md:w-auto shrink-0">
                             <span class="text-gray-500 font-bold text-sm">発生月:</span>
                             <select v-model.number="item.month" class="border border-gray-300 rounded px-2 py-1 text-sm bg-white font-bold text-blue-600">
                                 <option v-for="m in 12" :key="m" :value="m">{{ m }}月</option>
                             </select>
                         </div>
-                        
-                        <!-- 項目名 -->
                         <input v-model="item.name" placeholder="項目名 (例: 自動車税)" class="flex-1 min-w-[150px] border border-gray-300 rounded px-2 py-1 text-sm bg-white">
-                        
-                        <!-- 金額 -->
                         <div class="flex items-center gap-1 shrink-0">
                             <input v-model.number="item.amount" type="number" placeholder="金額" class="w-28 border border-gray-300 rounded px-2 py-1 text-right text-sm font-mono bg-white">
                             <span class="text-gray-500 text-sm">円</span>
                         </div>
-
-                        <!-- 削除ボタン -->
                         <button @click="removeItem(item.id)" class="w-8 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center text-lg">×</button>
                     </div>
                 </div>
@@ -97,45 +86,37 @@
     </div>
 
     <script>
-        // 本編と同じAPI URLを使用します
         const API_URL = 'https://script.google.com/macros/s/AKfycbwkX_aZKFRFAG5rCdV2fDmYxWL8km-QoJeYrSxKqdswPcIyd7VOOAIsWX-OLvsgSTxa/exec';
         const { createApp, ref, computed, watch, onMounted } = Vue;
 
-        const defaultAnnualPlan = {
-            items: [
-                { id: Date.now() + 1, month: 5, name: '自動車税', amount: 39500 },
-                { id: Date.now() + 2, month: 8, name: '帰省費用', amount: 50000 },
-                { id: Date.now() + 3, month: 12, name: '年払い保険料', amount: 45000 }
-            ]
-        };
+        const defaultAnnualPlan = [
+            { id: Date.now() + 1, month: 5, name: '自動車税', amount: 39500 },
+            { id: Date.now() + 2, month: 8, name: '帰省費用', amount: 50000 },
+            { id: Date.now() + 3, month: 12, name: '年払い保険料', amount: 45000 }
+        ];
 
         createApp({
             setup() {
                 const annualItems = ref([]);
                 const isLoading = ref(true);
                 const isSaving = ref(false);
-                // 既存データを破壊しないためのキャッシュ
-                const rootDataCache = ref({});
                 let saveTimeout = null;
 
                 const loadData = async () => {
                     try {
-                        const response = await fetch(API_URL);
+                        // パラメータを付与して AnnualData シートから取得するようにルーティング
+                        const response = await fetch(`${API_URL}?type=annualPlan`);
                         const data = await response.json();
                         
-                        // 既存のJSONデータ全体を保持しておく（上書き保存時に他を消さないため）
-                        rootDataCache.value = data || {};
-
-                        // annualPlanデータが存在すれば読み込み、なければデフォルトをセット
-                        if (data && data.annualPlan && Array.isArray(data.annualPlan.items)) {
-                            // 欠損データの補完 (フォールバック)
-                            annualItems.value = JSON.parse(JSON.stringify(data.annualPlan.items));
+                        // dataTypeフラグやitems配列の存在を確認し、無ければデフォルト値をセット
+                        if (data && data.dataType === 'annualPlan' && Array.isArray(data.items)) {
+                            annualItems.value = JSON.parse(JSON.stringify(data.items));
                         } else {
-                            annualItems.value = JSON.parse(JSON.stringify(defaultAnnualPlan.items));
+                            annualItems.value = JSON.parse(JSON.stringify(defaultAnnualPlan));
                         }
                     } catch (e) {
                         console.error("データロードエラー:", e);
-                        annualItems.value = JSON.parse(JSON.stringify(defaultAnnualPlan.items));
+                        annualItems.value = JSON.parse(JSON.stringify(defaultAnnualPlan));
                     } finally {
                         isLoading.value = false;
                     }
@@ -144,10 +125,9 @@
                 const saveData = async () => {
                     isSaving.value = true;
                     try {
-                        // キャッシュされた既存データに annualPlan だけをマージして保存
                         const payload = {
-                            ...rootDataCache.value,
-                            annualPlan: { items: annualItems.value }
+                            dataType: 'annualPlan', // バックエンドでの振り分け用フラグ
+                            items: annualItems.value
                         };
 
                         await fetch(API_URL, {
@@ -155,9 +135,6 @@
                             headers: { 'Content-Type': 'text/plain' },
                             body: JSON.stringify(payload)
                         });
-                        
-                        // 保存成功時にキャッシュも更新
-                        rootDataCache.value = payload;
                     } catch (e) {
                         console.error("データ保存エラー:", e);
                     } finally {
@@ -165,7 +142,6 @@
                     }
                 };
 
-                // 自動保存ロジック（本編と同じ）
                 watch(annualItems, () => {
                     if (isLoading.value) return;
                     clearTimeout(saveTimeout);
@@ -173,31 +149,21 @@
                     saveTimeout = setTimeout(saveData, 1500);
                 }, { deep: true });
 
-                // 月順にソートしたリストを返すcomputed
                 const sortedAnnualItems = computed(() => {
                     return [...annualItems.value].sort((a, b) => a.month - b.month);
                 });
 
-                // 総合計計算（NaN防止対応済）
                 const totalAnnualExpense = computed(() => {
                     return annualItems.value.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
                 });
 
-                // 毎月の必要積立額 (12等分して100円未満切り上げ等の調整)
                 const monthlyRequiredAmount = computed(() => {
                     if (totalAnnualExpense.value === 0) return 0;
-                    // 単純に12で割り、100円単位に切り上げる（少し余裕を持たせるため）
-                    const rawAmount = totalAnnualExpense.value / 12;
-                    return Math.ceil(rawAmount / 100) * 100;
+                    return Math.ceil((totalAnnualExpense.value / 12) / 100) * 100;
                 });
 
                 const addItem = () => {
-                    annualItems.value.push({
-                        id: Date.now(), // 一意のIDを付与
-                        month: 1,
-                        name: '新規予定',
-                        amount: 0
-                    });
+                    annualItems.value.push({ id: Date.now(), month: 1, name: '新規予定', amount: 0 });
                 };
 
                 const removeItem = (id) => {
@@ -205,7 +171,7 @@
                 };
 
                 const exportData = () => {
-                    const blob = new Blob([JSON.stringify({ annualPlan: { items: annualItems.value } }, null, 2)], { type: 'application/json' });
+                    const blob = new Blob([JSON.stringify({ dataType: 'annualPlan', items: annualItems.value }, null, 2)], { type: 'application/json' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
