@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>年間積立計画 (Annual Plan)</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; background-color: #f3f4f6; }
+        [v-cloak] { display: none; }
+    </style>
+</head>
+<body class="text-gray-800">
+    <!-- エラー表示用 -->
+    <div id="fatal-error" style="display:none; background:#fee2e2; color:#b91c1c; padding:15px; text-align:center; font-weight:bold;">
+        致命的なエラーが発生しました。<br><span id="error-msg" style="font-size:12px; font-weight:normal;"></span>
+    </div>
+    <script>
+        window.addEventListener('error', function(e) {
+            document.getElementById('fatal-error').style.display = 'block';
+            document.getElementById('error-msg').innerText += e.message + ' | ';
+        });
+    </script>
+
+    <div id="app" v-cloak class="max-w-3xl mx-auto p-4 pb-20">
+        <!-- ローディング画面 -->
+        <div v-if="isLoading" class="fixed inset-0 bg-white bg-opacity-90 flex items-center justify-center z-50">
+            <div class="text-xl font-bold text-blue-600">クラウドから年間計画を読み込み中...</div>
+        </div>
+
+        <header class="mb-6 flex justify-between items-end border-b pb-4 border-gray-300">
+            <div>
+                <h1 class="text-2xl font-bold text-yellow-600">📅 年間積立・支出計画</h1>
+                <p class="text-sm font-bold mt-1" :class="isSaving ? 'text-yellow-600' : 'text-green-600'">
+                    {{ isSaving ? '☁️ クラウドへ保存中...' : '✅ クラウド同期済' }}
+                </p>
+            </div>
+            <div class="flex gap-2 text-sm">
+                <button @click="exportData" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded shadow-sm">エクスポート</button>
+            </div>
+        </header>
+
+        <div v-if="!isLoading">
+            <!-- サマリーパネル -->
+            <section class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                <div class="bg-white p-6 rounded-lg shadow-md border-t-4 border-red-500">
+                    <div class="text-sm text-gray-500 mb-2 font-bold">年間予定支出 合計</div>
+                    <div class="text-3xl font-bold text-gray-800">¥{{ Number(totalAnnualExpense || 0).toLocaleString() }}</div>
+                </div>
+                <div class="bg-yellow-50 p-6 rounded-lg shadow-md border-t-4 border-yellow-500">
+                    <div class="text-sm text-yellow-700 mb-2 font-bold">毎月の必要積立額 (12ヶ月割)</div>
+                    <div class="text-3xl font-bold text-yellow-800">¥{{ Number(monthlyRequiredAmount || 0).toLocaleString() }}</div>
+                    <p class="text-xs text-yellow-600 mt-2">※この金額を家計簿本編の「年間積立へ繰入」に設定してください。</p>
+                </div>
+            </section>
+
+            <!-- 年間支出スケジュール -->
+            <div class="bg-white rounded-lg shadow-sm mb-6 p-4">
+                <div class="flex justify-between items-center mb-4 border-b-2 border-yellow-200 pb-2">
+                    <h2 class="text-lg font-bold text-gray-700">支出イベントスケジュール</h2>
+                    <button @click="addItem" class="bg-yellow-100 hover:bg-yellow-200 text-yellow-800 font-bold px-3 py-1 rounded text-sm shadow-sm">
+                        ＋ 予定を追加
+                    </button>
+                </div>
+
+                <div v-if="annualItems.length === 0" class="text-center text-gray-500 py-4">
+                    予定が登録されていません。「＋ 予定を追加」から登録してください。
+                </div>
+
+                <div class="space-y-3">
+                    <div v-for="(item, index) in sortedAnnualItems" :key="item.id" class="flex flex-wrap md:flex-nowrap items-center gap-2 p-3 bg-gray-50 rounded border border-gray-200">
+                        
+                        <!-- 月選択 -->
+                        <div class="flex items-center gap-1 w-full md:w-auto shrink-0">
+                            <span class="text-gray-500 font-bold text-sm">発生月:</span>
+                            <select v-model.number="item.month" class="border border-gray-300 rounded px-2 py-1 text-sm bg-white font-bold text-blue-600">
+                                <option v-for="m in 12" :key="m" :value="m">{{ m }}月</option>
+                            </select>
+                        </div>
+                        
+                        <!-- 項目名 -->
+                        <input v-model="item.name" placeholder="項目名 (例: 自動車税)" class="flex-1 min-w-[150px] border border-gray-300 rounded px-2 py-1 text-sm bg-white">
+                        
+                        <!-- 金額 -->
+                        <div class="flex items-center gap-1 shrink-0">
+                            <input v-model.number="item.amount" type="number" placeholder="金額" class="w-28 border border-gray-300 rounded px-2 py-1 text-right text-sm font-mono bg-white">
+                            <span class="text-gray-500 text-sm">円</span>
+                        </div>
+
+                        <!-- 削除ボタン -->
+                        <button @click="removeItem(item.id)" class="w-8 shrink-0 text-gray-400 hover:text-red-500 font-bold text-center text-lg">×</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 本編と同じAPI URLを使用します
+        const API_URL = 'https://script.google.com/macros/s/AKfycbwkX_aZKFRFAG5rCdV2fDmYxWL8km-QoJeYrSxKqdswPcIyd7VOOAIsWX-OLvsgSTxa/exec';
+        const { createApp, ref, computed, watch, onMounted } = Vue;
+
+        const defaultAnnualPlan = {
+            items: [
+                { id: Date.now() + 1, month: 5, name: '自動車税', amount: 39500 },
+                { id: Date.now() + 2, month: 8, name: '帰省費用', amount: 50000 },
+                { id: Date.now() + 3, month: 12, name: '年払い保険料', amount: 45000 }
+            ]
+        };
+
+        createApp({
+            setup() {
+                const annualItems = ref([]);
+                const isLoading = ref(true);
+                const isSaving = ref(false);
+                // 既存データを破壊しないためのキャッシュ
+                const rootDataCache = ref({});
+                let saveTimeout = null;
+
+                const loadData = async () => {
+                    try {
+                        const response = await fetch(API_URL);
+                        const data = await response.json();
+                        
+                        // 既存のJSONデータ全体を保持しておく（上書き保存時に他を消さないため）
+                        rootDataCache.value = data || {};
+
+                        // annualPlanデータが存在すれば読み込み、なければデフォルトをセット
+                        if (data && data.annualPlan && Array.isArray(data.annualPlan.items)) {
+                            // 欠損データの補完 (フォールバック)
+                            annualItems.value = JSON.parse(JSON.stringify(data.annualPlan.items));
+                        } else {
+                            annualItems.value = JSON.parse(JSON.stringify(defaultAnnualPlan.items));
+                        }
+                    } catch (e) {
+                        console.error("データロードエラー:", e);
+                        annualItems.value = JSON.parse(JSON.stringify(defaultAnnualPlan.items));
+                    } finally {
+                        isLoading.value = false;
+                    }
+                };
+
+                const saveData = async () => {
+                    isSaving.value = true;
+                    try {
+                        // キャッシュされた既存データに annualPlan だけをマージして保存
+                        const payload = {
+                            ...rootDataCache.value,
+                            annualPlan: { items: annualItems.value }
+                        };
+
+                        await fetch(API_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'text/plain' },
+                            body: JSON.stringify(payload)
+                        });
+                        
+                        // 保存成功時にキャッシュも更新
+                        rootDataCache.value = payload;
+                    } catch (e) {
+                        console.error("データ保存エラー:", e);
+                    } finally {
+                        isSaving.value = false;
+                    }
+                };
+
+                // 自動保存ロジック（本編と同じ）
+                watch(annualItems, () => {
+                    if (isLoading.value) return;
+                    clearTimeout(saveTimeout);
+                    isSaving.value = true;
+                    saveTimeout = setTimeout(saveData, 1500);
+                }, { deep: true });
+
+                // 月順にソートしたリストを返すcomputed
+                const sortedAnnualItems = computed(() => {
+                    return [...annualItems.value].sort((a, b) => a.month - b.month);
+                });
+
+                // 総合計計算（NaN防止対応済）
+                const totalAnnualExpense = computed(() => {
+                    return annualItems.value.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+                });
+
+                // 毎月の必要積立額 (12等分して100円未満切り上げ等の調整)
+                const monthlyRequiredAmount = computed(() => {
+                    if (totalAnnualExpense.value === 0) return 0;
+                    // 単純に12で割り、100円単位に切り上げる（少し余裕を持たせるため）
+                    const rawAmount = totalAnnualExpense.value / 12;
+                    return Math.ceil(rawAmount / 100) * 100;
+                });
+
+                const addItem = () => {
+                    annualItems.value.push({
+                        id: Date.now(), // 一意のIDを付与
+                        month: 1,
+                        name: '新規予定',
+                        amount: 0
+                    });
+                };
+
+                const removeItem = (id) => {
+                    annualItems.value = annualItems.value.filter(item => item.id !== id);
+                };
+
+                const exportData = () => {
+                    const blob = new Blob([JSON.stringify({ annualPlan: { items: annualItems.value } }, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `annual_plan_backup.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                };
+
+                onMounted(loadData);
+
+                return {
+                    isLoading, isSaving, annualItems, sortedAnnualItems,
+                    totalAnnualExpense, monthlyRequiredAmount,
+                    addItem, removeItem, exportData
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
