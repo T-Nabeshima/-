@@ -53,6 +53,7 @@
                 </div>
             </section>
 
+            <!-- 支出イベントスケジュール (既存) -->
             <div class="bg-white rounded-lg shadow-sm mb-6 p-4">
                 <div class="flex justify-between items-center mb-4 border-b-2 border-yellow-200 pb-2">
                     <h2 class="text-lg font-bold text-gray-700">支出イベントスケジュール</h2>
@@ -82,6 +83,61 @@
                     </div>
                 </div>
             </div>
+
+            <!-- 【追加】項目別 年間合計 -->
+            <div class="bg-white rounded-lg shadow-sm mb-6 p-4" v-if="annualItems.length > 0">
+                <h2 class="text-lg font-bold text-gray-700 mb-4 border-b-2 border-gray-200 pb-2">項目別 年間合計</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3">
+                    <div v-for="stat in expenseSummaryByName" :key="stat.name" class="flex justify-between items-center border-b border-gray-100 pb-1">
+                        <span class="text-sm text-gray-600 truncate mr-2" :title="stat.name">{{ stat.name }}</span>
+                        <span class="font-bold text-gray-800 text-sm">¥{{ stat.total.toLocaleString() }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 【追加】年間キャッシュフローシミュレーション -->
+            <div class="bg-white rounded-lg shadow-sm mb-6 p-4">
+                <div class="flex justify-between items-center mb-4 border-b-2 border-blue-200 pb-2">
+                    <h2 class="text-lg font-bold text-gray-700">キャッシュフローシミュレーション (1〜12月)</h2>
+                </div>
+                
+                <div class="mb-4 p-3 bg-blue-50 rounded-lg flex flex-wrap items-center gap-2 border border-blue-100">
+                    <label class="text-sm font-bold text-blue-800">期首積立残高 (シミュレーション開始時の残高):</label>
+                    <div class="flex items-center gap-1">
+                        <input v-model.number="initialBalance" type="number" placeholder="0" class="w-32 border border-blue-300 rounded px-2 py-1 text-right text-sm font-bold text-blue-900 bg-white">
+                        <span class="text-blue-800 text-sm font-bold">円</span>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left whitespace-nowrap">
+                        <thead class="text-xs text-gray-700 uppercase bg-gray-100">
+                            <tr>
+                                <th class="px-4 py-2 rounded-tl-lg w-16">月</th>
+                                <th class="px-4 py-2 text-right">毎月の積立 (入金)</th>
+                                <th class="px-4 py-2 text-right">支出予定合計</th>
+                                <th class="px-4 py-2 text-right rounded-tr-lg">月末積立残高</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="cf in cashFlowSimulation" :key="cf.month" class="border-b last:border-0 hover:bg-gray-50 transition-colors">
+                                <td class="px-4 py-2 font-bold text-gray-600">{{ cf.month }}月</td>
+                                <td class="px-4 py-2 text-right text-blue-600 font-mono">+¥{{ cf.deposit.toLocaleString() }}</td>
+                                <td class="px-4 py-2 text-right text-red-500 font-mono">-¥{{ cf.expenseTotal.toLocaleString() }}</td>
+                                <td class="px-4 py-2 text-right font-bold font-mono" :class="cf.balance < 0 ? 'text-red-600 bg-red-50' : 'text-gray-800'">
+                                    ¥{{ cf.balance.toLocaleString() }}
+                                    <span v-if="cf.balance < 0" class="block text-[10px] text-red-500 mt-1">※資金ショート</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="mt-3 text-xs text-gray-500 leading-relaxed">
+                    ※各月の「月末積立残高」は、前月末残高に「毎月の必要積立額」を加算し、その月の「支出予定合計」を差し引いたシミュレーション結果です。<br>
+                    ※残高がマイナス（資金ショート）になる月がある場合は、現在の「期首積立残高」を増やすか、家計簿本編での毎月の積立額（予算）を多めに調整してください。
+                </div>
+            </div>
+            
         </div>
     </div>
 
@@ -98,25 +154,33 @@
         createApp({
             setup() {
                 const annualItems = ref([]);
+                const initialBalance = ref(0); // 期首残高（シミュレーション用）
                 const isLoading = ref(true);
                 const isSaving = ref(false);
                 let saveTimeout = null;
 
                 const loadData = async () => {
                     try {
-                        // パラメータを付与して AnnualData シートから取得するようにルーティング
                         const response = await fetch(`${API_URL}?type=annualPlan`);
                         const data = await response.json();
                         
-                        // dataTypeフラグやitems配列の存在を確認し、無ければデフォルト値をセット
-                        if (data && data.dataType === 'annualPlan' && Array.isArray(data.items)) {
-                            annualItems.value = JSON.parse(JSON.stringify(data.items));
+                        if (data && data.dataType === 'annualPlan') {
+                            // アイテムの安全な読み込み（配列チェック）
+                            if (Array.isArray(data.items)) {
+                                annualItems.value = JSON.parse(JSON.stringify(data.items));
+                            } else {
+                                annualItems.value = JSON.parse(JSON.stringify(defaultAnnualPlan));
+                            }
+                            // 期首残高の安全な読み込み（数値フォールバック）
+                            initialBalance.value = Number(data.initialBalance) || 0;
                         } else {
                             annualItems.value = JSON.parse(JSON.stringify(defaultAnnualPlan));
+                            initialBalance.value = 0;
                         }
                     } catch (e) {
                         console.error("データロードエラー:", e);
                         annualItems.value = JSON.parse(JSON.stringify(defaultAnnualPlan));
+                        initialBalance.value = 0;
                     } finally {
                         isLoading.value = false;
                     }
@@ -126,7 +190,8 @@
                     isSaving.value = true;
                     try {
                         const payload = {
-                            dataType: 'annualPlan', // バックエンドでの振り分け用フラグ
+                            dataType: 'annualPlan',
+                            initialBalance: Number(initialBalance.value) || 0, // NaN防止
                             items: annualItems.value
                         };
 
@@ -142,7 +207,8 @@
                     }
                 };
 
-                watch(annualItems, () => {
+                // 配列および期首残高の変更を監視してオートセーブ
+                watch([annualItems, initialBalance], () => {
                     if (isLoading.value) return;
                     clearTimeout(saveTimeout);
                     isSaving.value = true;
@@ -162,6 +228,47 @@
                     return Math.ceil((totalAnnualExpense.value / 12) / 100) * 100;
                 });
 
+                // 【追加】項目別（名称別）の年間合計金額の算出
+                const expenseSummaryByName = computed(() => {
+                    const summary = {};
+                    annualItems.value.forEach(item => {
+                        const name = (item.name || '項目未定').trim();
+                        const amt = Number(item.amount) || 0;
+                        if (!summary[name]) {
+                            summary[name] = 0;
+                        }
+                        summary[name] += amt;
+                    });
+                    return Object.keys(summary).map(name => ({
+                        name: name,
+                        total: summary[name]
+                    })).sort((a, b) => b.total - a.total);
+                });
+
+                // 【追加】キャッシュフローシミュレーション（マイナス判定付き）
+                const cashFlowSimulation = computed(() => {
+                    let currentBalance = Number(initialBalance.value) || 0;
+                    const monthlyDeposit = Number(monthlyRequiredAmount.value) || 0;
+                    const result = [];
+                    
+                    for (let m = 1; m <= 12; m++) {
+                        // 対象月の支出アイテムを抽出し合計
+                        const expenses = annualItems.value.filter(item => Number(item.month) === m);
+                        const expenseTotal = expenses.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+                        
+                        // 残高計算: 前月末残高 + 当月積立額 - 当月支出額
+                        currentBalance = currentBalance + monthlyDeposit - expenseTotal;
+                        
+                        result.push({
+                            month: m,
+                            expenseTotal: expenseTotal,
+                            deposit: monthlyDeposit,
+                            balance: currentBalance
+                        });
+                    }
+                    return result;
+                });
+
                 const addItem = () => {
                     annualItems.value.push({ id: Date.now(), month: 1, name: '新規予定', amount: 0 });
                 };
@@ -171,7 +278,12 @@
                 };
 
                 const exportData = () => {
-                    const blob = new Blob([JSON.stringify({ dataType: 'annualPlan', items: annualItems.value }, null, 2)], { type: 'application/json' });
+                    const payload = { 
+                        dataType: 'annualPlan', 
+                        initialBalance: Number(initialBalance.value) || 0,
+                        items: annualItems.value 
+                    };
+                    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
@@ -183,8 +295,10 @@
                 onMounted(loadData);
 
                 return {
-                    isLoading, isSaving, annualItems, sortedAnnualItems,
-                    totalAnnualExpense, monthlyRequiredAmount,
+                    isLoading, isSaving, 
+                    annualItems, initialBalance,
+                    sortedAnnualItems, totalAnnualExpense, monthlyRequiredAmount,
+                    expenseSummaryByName, cashFlowSimulation,
                     addItem, removeItem, exportData
                 };
             }
